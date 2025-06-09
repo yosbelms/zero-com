@@ -1,7 +1,16 @@
 {
   "name": "zero-com",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "main": "index.js",
+  "repository": "https://github.com/yosbelms/zero-com",
+  "keywords": [
+    "webpack",
+    "api",
+    "node",
+    "http",
+    "server",
+    "client"
+  ],
   "scripts": {
     "build": "npx tsc"
   },
