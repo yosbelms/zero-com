@@ -19,7 +19,7 @@ export type Message = {
   [key: string]: any
 }
 
-export class ZeroRpcWebpackPlugin {
+export class ZeroComWebpackPlugin {
   private options: Options
   private compilationId: string
   private clientPattern: string
@@ -39,10 +39,10 @@ export class ZeroRpcWebpackPlugin {
   }
 
   apply(compiler: Compiler) {
-    const RPC_CLIENT_SEND = 'RPC_CLIENT_SEND'
-    const RPC_SERVER_REGISTRY = 'RPC_SERVER_REGISTRY'
+    const ZERO_COM_CLIENT_SEND = 'ZERO_COM_CLIENT_SEND'
+    const ZERO_COM_SERVER_REGISTRY = 'ZERO_COM_SERVER_REGISTRY'
 
-    const pluginName = ZeroRpcWebpackPlugin.name
+    const pluginName = ZeroComWebpackPlugin.name
     const { webpack } = compiler
     const { RawSource } = webpack.sources
 
@@ -89,7 +89,7 @@ export class ZeroRpcWebpackPlugin {
               const lineNumber = func.getStartLineNumber()
               const funcParams = func.getParameters().map(p => p.getName()).join(', ')
               const method = formatMethodName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-              const newFunctionBody = `return window.${RPC_CLIENT_SEND}({method: '${method}', params: [${funcParams}]})`
+              const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({method: '${method}', params: [${funcParams}]})`
               func.setBodyText(newFunctionBody)
               generatedFunctions.push(func.getText())
               console.log('client:', method)
@@ -103,11 +103,11 @@ export class ZeroRpcWebpackPlugin {
               const funcName = String(func.getName())
               const lineNumber = func.getStartLineNumber()
               const method = formatMethodName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-              chunks.push(`global.${RPC_SERVER_REGISTRY}['${method}'] = ${funcName}`)
+              chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${method}'] = ${funcName}`)
               console.log('server:', method)
             }
           })
-          newModuleContent = `${originalContent} if (!global.${RPC_SERVER_REGISTRY}) global.${RPC_SERVER_REGISTRY} = Object.create(null); ${chunks.join(',')}`
+          newModuleContent = `${originalContent} if (!global.${ZERO_COM_SERVER_REGISTRY}) global.${ZERO_COM_SERVER_REGISTRY} = Object.create(null); ${chunks.join(',')}`
         }
 
         project.createSourceFile(absolutePath + '.ts', newModuleContent, { overwrite: true })
@@ -121,8 +121,8 @@ export class ZeroRpcWebpackPlugin {
     if (this.options.development) return
 
     const replacements = [
-      { target: RPC_CLIENT_SEND, replacement: `__RPC_CLIENT_SEND_${this.compilationId}` },
-      { target: RPC_SERVER_REGISTRY, replacement: `__RPC_SERVER_REGISTRY_${this.compilationId}` }
+      { target: ZERO_COM_CLIENT_SEND, replacement: `__ZERO_COM_CLIENT_SEND_${this.compilationId}` },
+      { target: ZERO_COM_SERVER_REGISTRY, replacement: `__ZERO_COM_SERVER_REGISTRY_${this.compilationId}` }
     ]
 
     compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {

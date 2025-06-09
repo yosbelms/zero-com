@@ -1,12 +1,12 @@
-# Zero RPC
+# Zero-com
 
-Zero-byte no-lib utility for transparently linking client-side and server-side code residing in the same full-stack project via RPC.
+It is a zero-byte no-lib utility for transparently communicating client-side and server-side modules residing in the same full-stack project.
 
 ## Usage
 
 Webpack config.
 ```js
-new ZeroRpcWebpackPlugin({
+new ZeroComWebpackPlugin({
   development: true,
   patterns: {
     client: 'src/client/**',
@@ -34,14 +34,14 @@ import { getPhones } '../server/phones'
 ```
 
 ## Trasport layer
-Zero-rpc does not define any transport layer, it allows you to define a new one or reuse your own.
+Zero-com does not define any transport layer, it allows you to define a new one or reuse your own.
 
-- `window.RPC_CLIENT_SEND` all mesages from client-side will be sent using this function.
-- `global.RPC_CLIENT_REGISTRY` object available on the server-side of which the keys are the name of the methods and the values ​​are the functions to be executed.
+- `window.ZERO_COM_CLIENT_SEND` all mesages from client-side will be sent using this function.
+- `global.ZERO_COM_SERVER_REGISTRY` object available on the server-side of which the keys are the name of the methods and the values ​​are the functions to be executed.
 
 Client side example.
 ```js
-window.RPC_CLIENT_SEND = async ({ method, params }) {
+window.ZERO_COM_CLIENT_SEND = async ({ method, params }) {
   // -> send the message to server
   // <- return response
 }
@@ -50,7 +50,7 @@ window.RPC_CLIENT_SEND = async ({ method, params }) {
 Server side example.
 ```js
 const someCustomHandler = (message) => {
-  const func = global.RPC_CLIENT_REGISTRY[message.method]
+  const func = global.ZERO_COM_SERVER_REGISTRY[message.method]
   return func(...message.params)
 }
 ```
