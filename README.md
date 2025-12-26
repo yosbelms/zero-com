@@ -15,6 +15,17 @@ new ZeroComWebpackPlugin({
 })
 ```
 
+Rollup config.
+```js
+zeroComRollupPlugin({
+  development: true,
+  patterns: {
+    client: 'src/client/**',
+    server: 'src/server/api/**',
+  }
+})
+```
+
 The above code will identify all the references from client-side code to the server-side files and will tranform the modules to comunicate through your defined transport layer. The only callable functions in the server-side modules will be the exported async functions (not arrow functions). See the example below.
 
 Server side
