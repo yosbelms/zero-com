@@ -13,7 +13,8 @@
   ],
   "scripts": {
     "build": "npx tsc -d",
-    "prepublishOnly": "npm run build"
+    "clean": "find . -type f \\( -name \"*.js\" -o -name \"*.js.map\" -o -name \"*.d.ts\" -o -name \"*.d.ts.map\" \\) | grep -v \"./node_modules\" | xargs rm",
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "author": "",
   "license": "MIT",

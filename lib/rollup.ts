@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { minimatch } from 'minimatch'
 import path from 'path'
-import { ArrowFunction, Project } from 'ts-morph'
+import { ArrowFunction, CallExpression, Project } from 'ts-morph'
 import ts from 'typescript'
 import {
   Plugin,
@@ -89,14 +89,30 @@ export function zeroComRollupPlugin(options: Options): Plugin {
         })
         sourceFile.getVariableDeclarations().forEach(decl => {
           const initializer = decl.getInitializer()
-          if (initializer && initializer instanceof ArrowFunction) {
-            if (decl.isExported() && initializer.isAsync()) {
+          if (!initializer || !decl.isExported()) return
+
+          if (initializer instanceof ArrowFunction && initializer.isAsync()) {
+            const funcName = decl.getName()
+            const lineNumber = decl.getStartLineNumber()
+            const funcParams = initializer.getParameters().map(p => p.getName()).join(', ')
+            const funcId = formatFuncIdName(funcName, path.relative(process.cwd(), id), lineNumber)
+            const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
+            initializer.setBodyText(newFunctionBody)
+          } else if (initializer.getKind() === ts.SyntaxKind.CallExpression && (initializer as CallExpression).getExpression().getText() === 'serverFn') {
+            const call = initializer as CallExpression
+            const arg = call.getArguments()[0]
+            if (arg && arg instanceof ArrowFunction) {
               const funcName = decl.getName()
               const lineNumber = decl.getStartLineNumber()
-              const funcParams = initializer.getParameters().map(p => p.getName()).join(', ')
+              const funcParams = arg.getParameters().map(p => p.getName()).join(', ')
               const funcId = formatFuncIdName(funcName, path.relative(process.cwd(), id), lineNumber)
               const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
-              initializer.setBodyText(newFunctionBody)
+              
+              // Create a new arrow function string
+              const newArrowFunc = `(${funcParams}) => { ${newFunctionBody} }`
+              
+              // Replace the serverFn call with the new arrow function
+              decl.setInitializer(newArrowFunc)
             }
           }
         })
@@ -112,8 +128,12 @@ export function zeroComRollupPlugin(options: Options): Plugin {
         })
         sourceFile.getVariableDeclarations().forEach(decl => {
           const initializer = decl.getInitializer()
-          if (initializer && initializer instanceof ArrowFunction) {
-            if (decl.isExported() && initializer.isAsync()) {
+          if (initializer) {
+            const isServerFn = initializer.getKind() === ts.SyntaxKind.CallExpression && (initializer as CallExpression).getExpression().getText() === 'serverFn'
+            if (
+              (initializer instanceof ArrowFunction && decl.isExported() && initializer.isAsync()) ||
+              (isServerFn && decl.isExported())
+            ) {
               const funcName = decl.getName()
               const lineNumber = decl.getStartLineNumber()
               const funcId = formatFuncIdName(funcName, path.relative(process.cwd(), id), lineNumber)
