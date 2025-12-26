@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { minimatch } from 'minimatch'
 import path from 'path'
-import { Project } from 'ts-morph'
+import { ArrowFunction, Project } from 'ts-morph'
 import ts from 'typescript'
 import {
   Plugin,
@@ -11,7 +11,7 @@ import {
   NormalizedOutputOptions,
   RenderedChunk
 } from 'rollup'
-import { Options, ZERO_COM_CLIENT_SEND, ZERO_COM_SERVER_REGISTRY, formatMethodName } from './common'
+import { Options, ZERO_COM_CLIENT_SEND, ZERO_COM_SERVER_REGISTRY, formatFuncIdName } from './common'
 
 export function zeroComRollupPlugin(options: Options): Plugin {
   const { development = true, patterns } = options
@@ -82,9 +82,22 @@ export function zeroComRollupPlugin(options: Options): Plugin {
             const funcName = String(func.getName())
             const lineNumber = func.getStartLineNumber()
             const funcParams = func.getParameters().map(p => p.getName()).join(', ')
-            const method = formatMethodName(funcName, path.relative(process.cwd(), id), lineNumber)
-            const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({method: '${method}', params: [${funcParams}]})`
+            const funcId = formatFuncIdName(funcName, path.relative(process.cwd(), id), lineNumber)
+            const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
             func.setBodyText(newFunctionBody)
+          }
+        })
+        sourceFile.getVariableDeclarations().forEach(decl => {
+          const initializer = decl.getInitializer()
+          if (initializer && initializer instanceof ArrowFunction) {
+            if (decl.isExported() && initializer.isAsync()) {
+              const funcName = decl.getName()
+              const lineNumber = decl.getStartLineNumber()
+              const funcParams = initializer.getParameters().map(p => p.getName()).join(', ')
+              const funcId = formatFuncIdName(funcName, path.relative(process.cwd(), id), lineNumber)
+              const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
+              initializer.setBodyText(newFunctionBody)
+            }
           }
         })
       } else {
@@ -93,8 +106,19 @@ export function zeroComRollupPlugin(options: Options): Plugin {
           if (func.isExported() && func.isAsync()) {
             const funcName = String(func.getName())
             const lineNumber = func.getStartLineNumber()
-            const method = formatMethodName(funcName, path.relative(process.cwd(), id), lineNumber)
-            chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${method}'] = ${funcName}`)
+            const funcId = formatFuncIdName(funcName, path.relative(process.cwd(), id), lineNumber)
+            chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${funcId}'] = ${funcName}`)
+          }
+        })
+        sourceFile.getVariableDeclarations().forEach(decl => {
+          const initializer = decl.getInitializer()
+          if (initializer && initializer instanceof ArrowFunction) {
+            if (decl.isExported() && initializer.isAsync()) {
+              const funcName = decl.getName()
+              const lineNumber = decl.getStartLineNumber()
+              const funcId = formatFuncIdName(funcName, path.relative(process.cwd(), id), lineNumber)
+              chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${funcId}'] = ${funcName}`)
+            }
           }
         })
 

@@ -31,10 +31,9 @@ The above code will identify all the references from client-side code to the ser
 Server side
 ```js
 // server/phones.ts
-// callable
 export async function getPhones() { }
 
-// not callable from client-side
+// or
 export const getPhones = async () => { }
 ```
 
@@ -45,26 +44,83 @@ import { getPhones } '../server/phones'
 ```
 
 ## Trasport layer
-Zero-com does not define any transport layer, it allows you to define a new one or reuse your own.
+Zero-com does not define any transport layer, it is up to you to create one or reuse your own.
 
 - `window.ZERO_COM_CLIENT_SEND` all mesages from client-side will be sent using this function.
-- `global.ZERO_COM_SERVER_REGISTRY` object available on the server-side of which the keys are the name of the methods and the values ​​are the functions to be executed.
+- `global.ZERO_COM_SERVER_REGISTRY` object available on the server-side whose the keys are the server functions ids and the values ​​are the functions.
 
-Client side example.
+Client side.
 ```js
-window.ZERO_COM_CLIENT_SEND = async ({ method, params }) {
+window.ZERO_COM_CLIENT_SEND = async ({ funcId, params }) {
   // -> send the message to server
   // <- return response
 }
 ```
 
-Server side example.
+Server side.
 ```js
 const someCustomHandler = (message) => {
-  const func = global.ZERO_COM_SERVER_REGISTRY[message.method]
-  return func(...message.params)
+  const func = global.ZERO_COM_SERVER_REGISTRY[message.funcId]
+  return execServerFn(func, message.params)
 }
 ```
+
+Example:
+```js
+// client
+window.ZERO_COM_CLIENT_SEND = async (message) {
+  const response = await fetch('http://localhost:8000', {
+    method: 'POST',
+    body: JSON.stringify(message)
+  })
+  return await response.json()
+}
+```
+
+```js
+// server
+import http from 'node:http'
+
+const server = http.createServer(async (req, res) => {
+  if (req.funcId === 'POST') {
+    const buffers = []
+    for await (const chunk of req) buffers.push(chunk)
+    const data = Buffer.concat(buffers).toString()
+    const message = JSON.parse(data)
+    const func = global.ZERO_COM_SERVER_REGISTRY[message.funcId]
+    const result = await execServerFn(func, message.params)
+    res.statusCode = 200
+    res.end(JSON.stringify(result))
+  } else {
+    res.statusCode = 400
+    res.end('')
+  }
+})
+
+server.listen(8000, () => {
+  console.log('Server running at http://localhost:8000/')
+})
+```
+
+Context
+
+Often you want to pass a context related object to the server functions to have access to data like request, response, session, etc.
+
+Wrap the server function in `serverFunc` and receive the context as the first param
+```js
+export const getPhones = serverFunc(async (ctx, name) => { })
+```
+
+Pass context to `execServerFn`
+```js
+const myHandler = (request, response, message) => {
+  const ctx = { request, response}
+  const func = global.ZERO_COM_SERVER_REGISTRY[message.funcId]
+  // pass context on exec
+  return execServerFn(func, ctx, message.params)
+}
+```
+
 
 ## Plugin options
 - development: if `false` will add internal variable renaming to the final bundle.

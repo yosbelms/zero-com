@@ -1,13 +1,13 @@
 import fs from 'fs'
 import { minimatch } from 'minimatch'
 import path from 'path'
-import { Project } from 'ts-morph'
+import { ArrowFunction, Project } from 'ts-morph'
 import ts from 'typescript'
 import { Compiler } from 'webpack'
-import { Options, ZERO_COM_CLIENT_SEND, ZERO_COM_SERVER_REGISTRY, formatMethodName } from './common'
+import { Options, ZERO_COM_CLIENT_SEND, ZERO_COM_SERVER_REGISTRY, formatFuncIdName } from './common'
 
 export type Message = {
-  method: string,
+  funcId: string,
   params: any[],
   [key: string]: any
 }
@@ -78,11 +78,26 @@ export class ZeroComWebpackPlugin {
               const funcName = String(func.getName())
               const lineNumber = func.getStartLineNumber()
               const funcParams = func.getParameters().map(p => p.getName()).join(', ')
-              const method = formatMethodName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-              const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({method: '${method}', params: [${funcParams}]})`
+              const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
+              const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
               func.setBodyText(newFunctionBody)
               generatedFunctions.push(func.getText())
-              console.log('client:', method)
+              console.log('client:', funcId)
+            }
+          })
+          sourceFile.getVariableDeclarations().forEach(decl => {
+            const initializer = decl.getInitializer()
+            if (initializer && initializer instanceof ArrowFunction) {
+              if (decl.isExported() && initializer.isAsync()) {
+                const funcName = decl.getName()
+                const lineNumber = decl.getStartLineNumber()
+                const funcParams = initializer.getParameters().map(p => p.getName()).join(', ')
+                const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
+                const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
+                initializer.setBodyText(newFunctionBody)
+                generatedFunctions.push(decl.getVariableStatementOrThrow().getText())
+                console.log('client:', funcId)
+              }
             }
           })
           newModuleContent = generatedFunctions.join('\n\n')
@@ -92,9 +107,21 @@ export class ZeroComWebpackPlugin {
             if (func.isExported() && func.isAsync()) {
               const funcName = String(func.getName())
               const lineNumber = func.getStartLineNumber()
-              const method = formatMethodName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-              chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${method}'] = ${funcName}`)
-              console.log('server:', method)
+              const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
+              chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${funcId}'] = ${funcName}`)
+              console.log('server:', funcId)
+            }
+          })
+          sourceFile.getVariableDeclarations().forEach(decl => {
+            const initializer = decl.getInitializer()
+            if (initializer && initializer instanceof ArrowFunction) {
+              if (decl.isExported() && initializer.isAsync()) {
+                const funcName = decl.getName()
+                const lineNumber = decl.getStartLineNumber()
+                const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
+                chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${funcId}'] = ${funcName}`)
+                console.log('server:', funcId)
+              }
             }
           })
           newModuleContent = `${originalContent} if (!global.${ZERO_COM_SERVER_REGISTRY}) global.${ZERO_COM_SERVER_REGISTRY} = Object.create(null); ${chunks.join(',')}`

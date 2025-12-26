@@ -9,6 +9,6 @@ export type Options = {
 export const ZERO_COM_CLIENT_SEND = 'ZERO_COM_CLIENT_SEND'
 export const ZERO_COM_SERVER_REGISTRY = 'ZERO_COM_SERVER_REGISTRY'
 
-export const formatMethodName = (funcName: string, path: string, line: number): string => {
+export const formatFuncIdName = (funcName: string, path: string, line: number): string => {
   return `${funcName}@${path}:${line}`
 }

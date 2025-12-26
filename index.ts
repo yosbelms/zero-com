@@ -1,2 +1,1 @@
-export * from './lib/webpack'
-export * from './lib/rollup'
+export * from './lib/index'
