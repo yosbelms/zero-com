@@ -29,7 +29,7 @@ describe('func()', () => {
       const fn = func((ctx: context<{ userId: string }>, id: string) => `${ctx?.userId ?? 'null'}-${id}`)
       // When called directly at runtime without build transform, first arg goes to ctx, second to id
       // This tests the raw runtime behavior - build plugin would transform call sites
-      expect(fn({ userId: 'test' } as any, '123')).toBe('test-123')
+      expect((fn as any)({ userId: 'test' } as any, '123')).toBe('test-123')
     })
 
     it('should set requireContext to true', () => {

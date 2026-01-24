@@ -8,16 +8,16 @@ declare global {
 declare const contextBrand: unique symbol
 export type context<T = unknown> = T & { readonly [contextBrand]: never }
 
-// Type helper to remove Context param from function signature
+// Type helper to remove context param from function signature
 type RemoveContextParam<F> =
-  F extends (ctx: context<unknown>, ...args: infer A) => infer R
-  ? (...args: A) => R
-  : F extends (...args: infer A) => infer R
-  ? (...args: A) => R
-  : never
+  F extends (ctx: infer C, ...args: infer A) => infer R
+  ? C extends context<unknown>
+    ? (...args: A) => R
+    : F
+  : F
 
 // Single unified signature - Context detection happens via type
-export function func<F extends (...args: any[]) => any>(fn: F): RemoveContextParam<F> & { server: true }
+export function func<F extends (...args: any[]) => any>(fn: F): RemoveContextParam<F>
 
 // Implementation
 export function func(fn: (...args: any[]) => any): (...args: any[]) => any {
