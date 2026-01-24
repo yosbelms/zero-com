@@ -1,15 +1,11 @@
-import fs from 'fs'
-import path from 'path'
-import { Compiler } from 'webpack'
+import { Compiler, RuleSetRule } from 'webpack'
 import {
   Options,
   ServerFuncRegistry,
   buildRegistry,
-  resolveFilePath,
-  transformSourceFile,
-  emitToJs,
   applyReplacements,
-  generateCompilationId
+  generateCompilationId,
+  FILE_EXTENSIONS
 } from './common'
 
 export class ZeroComWebpackPlugin {
@@ -32,24 +28,19 @@ export class ZeroComWebpackPlugin {
       console.log(`[ZeroComWebpackPlugin] Found ${this.registry.size} files with server functions`)
     })
 
-    // Transform files during module resolution
-    compiler.hooks.normalModuleFactory.tap(pluginName, (nmf) => {
-      nmf.hooks.beforeResolve.tap(pluginName, (resolveData) => {
-        if (!resolveData.request.startsWith('.') && !resolveData.request.startsWith('/')) return
+    // Add loader rule for TypeScript/JavaScript files
+    const loaderPath = require.resolve('./webpack-loader')
+    const loaderRule: RuleSetRule = {
+      test: new RegExp(`\\.(${FILE_EXTENSIONS.slice(1).map(e => e.slice(1)).join('|')})$`),
+      exclude: /node_modules/,
+      enforce: 'pre',
+      use: [{
+        loader: loaderPath,
+        options: { registry: this.registry }
+      }]
+    }
 
-        const resolvedPath = resolveFilePath(path.resolve(resolveData.context, resolveData.request))
-        if (!resolvedPath || !fs.existsSync(resolvedPath)) return
-
-        const content = fs.readFileSync(resolvedPath, 'utf8')
-        const result = transformSourceFile(resolvedPath, content, this.registry)
-        if (!result.transformed) return
-
-        const jsContent = emitToJs(resolvedPath, result.content)
-        resolveData.request = `data:text/javascript,${encodeURIComponent(jsContent)}`
-
-        console.log(`[ZeroComWebpackPlugin] Transformed: ${path.relative(compiler.context, resolvedPath)}`)
-      })
-    })
+    compiler.options.module.rules.unshift(loaderRule)
 
     // Production: minify global names
     if (this.options.development) return
