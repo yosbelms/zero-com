@@ -1,190 +1,74 @@
 import fs from 'fs'
-import { minimatch } from 'minimatch'
 import path from 'path'
-import { ArrowFunction, CallExpression, Project } from 'ts-morph'
-import ts from 'typescript'
 import { Compiler } from 'webpack'
-import { Options, ZERO_COM_CLIENT_SEND, ZERO_COM_SERVER_REGISTRY, formatFuncIdName } from './common'
-
-export type Message = {
-  funcId: string,
-  params: any[],
-  [key: string]: any
-}
+import {
+  Options,
+  ServerFuncRegistry,
+  buildRegistry,
+  resolveFilePath,
+  transformSourceFile,
+  emitToJs,
+  applyReplacements,
+  generateCompilationId
+} from './common'
 
 export class ZeroComWebpackPlugin {
   private options: Options
   private compilationId: string
-  private clientPattern: string
-  private serverPattern: string
+  private registry: ServerFuncRegistry = new Map()
 
-  constructor(options: Options) {
-    this.options = {
-      development: true,
-      ...options,
-      patterns: {
-        ...options.patterns
-      }
-    }
-    this.compilationId = String(Math.floor(Math.random() * 1000000))
-    this.clientPattern = this.options.patterns.client
-    this.serverPattern = this.options.patterns.server
+  constructor(options: Options = {}) {
+    this.options = { development: true, ...options }
+    this.compilationId = generateCompilationId()
   }
 
   apply(compiler: Compiler) {
     const pluginName = ZeroComWebpackPlugin.name
     const { webpack } = compiler
-    const { RawSource } = webpack.sources
 
+    // Build registry before compilation
+    compiler.hooks.beforeCompile.tap(pluginName, () => {
+      buildRegistry(compiler.context, this.registry)
+      console.log(`[ZeroComWebpackPlugin] Found ${this.registry.size} files with server functions`)
+    })
+
+    // Transform files during module resolution
     compiler.hooks.normalModuleFactory.tap(pluginName, (nmf) => {
       nmf.hooks.beforeResolve.tap(pluginName, (resolveData) => {
-        const absolutePath = path.resolve(resolveData.context, resolveData.request)
-        const isServerFile = minimatch(absolutePath, path.join(compiler.context, this.serverPattern))
-        if (!isServerFile) return
+        if (!resolveData.request.startsWith('.') && !resolveData.request.startsWith('/')) return
 
-        const requestedFromClient = minimatch(resolveData.contextInfo.issuer, path.join(compiler.context, this.clientPattern))
+        const resolvedPath = resolveFilePath(path.resolve(resolveData.context, resolveData.request))
+        if (!resolvedPath || !fs.existsSync(resolvedPath)) return
 
-        const tsPath = absolutePath + '.ts'
-        const jsPath = absolutePath + '.js'
-        const mjsPath = absolutePath + '.mjs'
-        let resolvedPath = ''
+        const content = fs.readFileSync(resolvedPath, 'utf8')
+        const result = transformSourceFile(resolvedPath, content, this.registry)
+        if (!result.transformed) return
 
-        if (fs.existsSync(tsPath)) {
-          resolvedPath = tsPath
-        } else if (fs.existsSync(jsPath)) {
-          resolvedPath = jsPath
-        } else if (fs.existsSync(mjsPath)) {
-          resolvedPath = mjsPath
-        } else {
-          throw new Error('Unable to resolve: ' + absolutePath)
-        }
+        const jsContent = emitToJs(resolvedPath, result.content)
+        resolveData.request = `data:text/javascript,${encodeURIComponent(jsContent)}`
 
-        const originalContent = fs.readFileSync(resolvedPath, 'utf8')
-
-        const project = new Project({
-          compilerOptions: {
-            target: ts.ScriptTarget.ES2017,
-            module: ts.ModuleKind.ESNext,
-          },
-        })
-
-        const sourceFile = project.createSourceFile(absolutePath, originalContent, { overwrite: true })
-        let newModuleContent = ''
-
-        if (requestedFromClient) {
-          const generatedFunctions: string[] = []
-          sourceFile.getFunctions().forEach(func => {
-            if (func.isExported() && func.isAsync()) {
-              const funcName = String(func.getName())
-              const lineNumber = func.getStartLineNumber()
-              const funcParams = func.getParameters().map(p => p.getName()).join(', ')
-              const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-              const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
-              func.setBodyText(newFunctionBody)
-              generatedFunctions.push(func.getText())
-              console.log('client:', funcId)
-            }
-          })
-          sourceFile.getVariableDeclarations().forEach(decl => {
-            const initializer = decl.getInitializer()
-            if (!initializer || !decl.isExported()) return
-
-            if (initializer instanceof ArrowFunction && initializer.isAsync()) {
-              const funcName = decl.getName()
-              const lineNumber = decl.getStartLineNumber()
-              const funcParams = initializer.getParameters().map(p => p.getName()).join(', ')
-              const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-              const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
-              initializer.setBodyText(newFunctionBody)
-              generatedFunctions.push(decl.getVariableStatementOrThrow().getText())
-              console.log('client:', funcId)
-            } else if (initializer.getKind() === ts.SyntaxKind.CallExpression && (initializer as CallExpression).getExpression().getText() === 'serverFn') {
-              const call = initializer as CallExpression
-              const arg = call.getArguments()[0]
-              if (arg && arg instanceof ArrowFunction) {
-                const funcName = decl.getName()
-                const lineNumber = decl.getStartLineNumber()
-                const funcParams = arg.getParameters().map(p => p.getName()).join(', ')
-                const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-                const newFunctionBody = `return window.${ZERO_COM_CLIENT_SEND}({funcId: '${funcId}', params: [${funcParams}]})`
-                
-                // Create a new arrow function string
-                const newArrowFunc = `(${funcParams}) => { ${newFunctionBody} }`
-                
-                // Replace the serverFn call with the new arrow function
-                decl.setInitializer(newArrowFunc)
-                
-                generatedFunctions.push(decl.getVariableStatementOrThrow().getText())
-                console.log('client:', funcId)
-              }
-            }
-          })
-          newModuleContent = generatedFunctions.join('\n\n')
-        } else {
-          const chunks: string[] = []
-          sourceFile.getFunctions().forEach(func => {
-            if (func.isExported() && func.isAsync()) {
-              const funcName = String(func.getName())
-              const lineNumber = func.getStartLineNumber()
-              const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-              chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${funcId}'] = ${funcName}`)
-              console.log('server:', funcId)
-            }
-          })
-          sourceFile.getVariableDeclarations().forEach(decl => {
-            const initializer = decl.getInitializer()
-            if (initializer) {
-              const isServerFn = initializer.getKind() === ts.SyntaxKind.CallExpression && (initializer as CallExpression).getExpression().getText() === 'serverFn'
-              if (
-                (initializer instanceof ArrowFunction && decl.isExported() && initializer.isAsync()) ||
-                (isServerFn && decl.isExported())
-              ) {
-                const funcName = decl.getName()
-                const lineNumber = decl.getStartLineNumber()
-                const funcId = formatFuncIdName(funcName, path.relative(compiler.context, absolutePath), lineNumber)
-                chunks.push(`global.${ZERO_COM_SERVER_REGISTRY}['${funcId}'] = ${funcName}`)
-                console.log('server:', funcId)
-              }
-            }
-          })
-          newModuleContent = `${originalContent} if (!global.${ZERO_COM_SERVER_REGISTRY}) global.${ZERO_COM_SERVER_REGISTRY} = Object.create(null); ${chunks.join(',')}`
-        }
-
-        project.createSourceFile(absolutePath + '.ts', newModuleContent, { overwrite: true })
-        const result = project.emitToMemory()
-        const newContent = result.getFiles()[0].text
-        const inlineLoader = `data:text/javascript,${encodeURIComponent(newContent)}`
-        resolveData.request = inlineLoader
+        console.log(`[ZeroComWebpackPlugin] Transformed: ${path.relative(compiler.context, resolvedPath)}`)
       })
     })
 
+    // Production: minify global names
     if (this.options.development) return
 
-    const replacements = [
-      { target: ZERO_COM_CLIENT_SEND, replacement: `__ZERO_COM_CLIENT_SEND_${this.compilationId}` },
-      { target: ZERO_COM_SERVER_REGISTRY, replacement: `__ZERO_COM_SERVER_REGISTRY_${this.compilationId}` }
-    ]
-
+    const { RawSource } = webpack.sources
     compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {
-      compilation.hooks.processAssets.tap({ name: pluginName, stage: webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_INLINE }, (assets) => {
-        for (const assetName in assets) {
-          if (assetName.endsWith('.js')) {
-            let assetSource = String(assets[assetName].source())
-            let modified = false
-            replacements.forEach(({ target, replacement }) => {
-              if (assetSource.includes(target)) {
-                assetSource = assetSource.replaceAll(target, replacement)
-                modified = true
-              }
-            })
-            if (modified) {
-              compilation.updateAsset(assetName, new RawSource(assetSource))
+      compilation.hooks.processAssets.tap(
+        { name: pluginName, stage: webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_INLINE },
+        (assets) => {
+          for (const assetName in assets) {
+            if (!assetName.endsWith('.js')) continue
+            const source = String(assets[assetName].source())
+            const newSource = applyReplacements(source, this.compilationId)
+            if (newSource !== source) {
+              compilation.updateAsset(assetName, new RawSource(newSource))
             }
           }
         }
-
-      })
+      )
     })
-
   }
 }

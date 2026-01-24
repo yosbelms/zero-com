@@ -1,6 +1,6 @@
 # Zero-com
 
-It is a zero-byte no-lib utility for transparently communicating client-side and server-side modules residing in the same full-stack project.
+A ~420 Bytes utility for transparently communicating client and server in full-stack projects through compile-time code transformation, with end-to-end static type checking.
 
 ## Table of Contents
 
@@ -27,10 +27,6 @@ module.exports = {
   plugins: [
     new ZeroComWebpackPlugin({
       development: true,
-      patterns: {
-        client: 'src/client/**',
-        server: 'src/server/api/**',
-      },
     }),
   ],
 };
@@ -49,10 +45,6 @@ export default {
   plugins: [
     zeroComRollupPlugin({
       development: true,
-      patterns: {
-        client: 'src/client/**',
-        server: 'src/server/api/**',
-      },
     }),
   ],
 };
@@ -61,16 +53,17 @@ export default {
 The above code will identify all the references from client-side code to the server-side files and will tranform the modules to comunicate through your defined transport layer. The only callable functions in the server-side modules will be the exported async functions. See the example below.
 
 Server side
-```js
+```ts
 // server/phones.ts
-export async function getPhones() { }
+import { func } from 'zero-com';
 
-// or
-export const getPhones = async () => { }
+export const getPhones = func(async () => { 
+  // ...
+})
 ```
 
 Client side
-```js
+```tsx
 // client/phones.tsx
 import { getPhones } '../server/phones'
 ```
@@ -84,23 +77,25 @@ Zero-com does not define any transport layer, it is up to you to create one or r
 The following diagram illustrates the communication flow between the client and server:
 
 ```
-+--------+      +-----------------------------+      +-------------+
-| Client |----->| window.ZERO_COM_CLIENT_SEND |----->| Your Server |
-+--------+      +-----------------------------+      +-------------+
-                                                           |
-                                                           v
-+--------+      +-------------------------+      +-------------------+
-| Client |<-----| (Your custom transport) |<-----| someCustomHandler |
-+--------+      +-------------------------+      +-------------------+
++--------+      +----------------------------------+      +-------------+
+| Client |----->| globalThis.ZERO_COM_CLIENT_SEND  |----->| Your Server |
++--------+      +----------------------------------+      +-------------+
+                                                                |
+                                                                v
++--------+      +-------------------------+      +--------------------------------------+
+| Client |<-----| (Your custom transport) |<-----| globalThis.ZERO_COM_SERVER_REGISTRY  |
++--------+      +-------------------------+      +--------------------------------------+
 ```
 
 ### Client-side
 
-All messages from the client-side will be sent using the `window.ZERO_COM_CLIENT_SEND` function. You need to define this function in your client-side code.
+All messages from the client-side will be sent using the transport function you define. Import `send` from `zero-com` and pass your transport function.
 
 ```javascript
 // client/transport.js
-window.ZERO_COM_CLIENT_SEND = async ({ funcId, params }) => {
+import { send } from 'zero-com';
+
+send(async (funcId, params) => {
   const response = await fetch('http://localhost:8000/api', {
     method: 'POST',
     headers: {
@@ -109,24 +104,19 @@ window.ZERO_COM_CLIENT_SEND = async ({ funcId, params }) => {
     body: JSON.stringify({ funcId, params }),
   });
   return await response.json();
-};
+});
 ```
 
 ### Server-side
 
-On the server-side, you need to create a handler that receives messages from the client, executes the corresponding function, and returns the result. The `global.ZERO_COM_SERVER_REGISTRY` object contains all the server functions that can be called from the client.
+On the server-side, you need to create a handler that receives messages from the client, executes the corresponding function, and returns the result. Import `handle` from `zero-com` and call it with the function ID, context, and arguments.
 
 ```javascript
 // server/api.js
-import { execServerFn } from 'zero-com';
+import { handle } from 'zero-com';
 
 const someCustomHandler = async (message) => {
-  const func = global.ZERO_COM_SERVER_REGISTRY[message.funcId];
-  if (func) {
-    return await execServerFn(func, message.params);
-  } else {
-    throw new Error(`Function with id ${message.funcId} not found.`);
-  }
+  return await handle(message.funcId, null, message.params);
 };
 
 // Example of how to use the handler with an Express server
@@ -155,13 +145,17 @@ Often you want to pass a context-related object to the server functions to have 
 
 ### Passing Context to Server Functions
 
-To pass context to a server function, you need to wrap the function in `serverFn` and receive the context as the first parameter.
+To pass context to a server function, you need to wrap the function in `func` and type the first parameter as `context`. The plugin detects this type and handles it accordingly.
 
-```javascript
-// server/api/phones.js
-import { serverFn } from 'zero-com';
+```typescript
+// server/api/phones.ts
+import { func, context } from 'zero-com';
 
-export const getPhones = serverFn(async (ctx, name) => {
+type MyContext = {
+    request: any
+}
+
+export const getPhones = func(async (ctx: context<MyContext>, name: string) => {
   // ctx is the context object passed from the server
   console.log(ctx.request.headers);
   // ... your code
@@ -170,17 +164,16 @@ export const getPhones = serverFn(async (ctx, name) => {
 
 ### Providing Context on the Server
 
-You can pass the context to `execServerFn` when you execute the server function.
+You can pass the context to `handle` when you execute the server function.
 
 ```javascript
 // server/api.js
-import { execServerFn } from 'zero-com';
+import { handle } from 'zero-com';
 
 const myHandler = (request, response, message) => {
   const ctx = { request, response };
-  const func = global.ZERO_COM_SERVER_REGISTRY[message.funcId];
   // pass context on exec
-  return execServerFn(func, ctx, message.params);
+  return handle(message.funcId, ctx, message.params);
 };
 ```
 
@@ -189,9 +182,6 @@ const myHandler = (request, response, message) => {
 | Option      | Type      | Description                                                                 |
 |-------------|-----------|-----------------------------------------------------------------------------|
 | `development` | `boolean`   | If `false`, will add internal variable renaming to the final bundle.        |
-| `patterns`    | `object`    |                                                                             |
-| `patterns.client` | `string` | A glob pattern to identify client-side files.                               |
-| `patterns.server` | `string` | A glob pattern to identify server-side files.                               |
 
 ## Complete Example
 
@@ -206,17 +196,17 @@ Here's a complete example of how to use Zero-com in a project.
 ├── rollup.config.js
 └── src
     ├── client
-    │   ├── index.js
-    │   └── transport.js
+    │   ├── index.ts
+    │   └── transport.ts
     └── server
         └── api
-            └── phones.js
+            └── phones.ts
 ```
 
 ### Client-side
 
-```javascript
-// src/client/index.js
+```typescript
+// src/client/index.ts
 import { getPhones } from '../../server/api/phones';
 
 async function main() {
@@ -227,9 +217,11 @@ async function main() {
 main();
 ```
 
-```javascript
-// src/client/transport.js
-window.ZERO_COM_CLIENT_SEND = async ({ funcId, params }) => {
+```typescript
+// src/client/transport.ts
+import { send } from 'zero-com';
+
+send(async (funcId, params) => {
   const response = await fetch('http://localhost:8000/api', {
     method: 'POST',
     headers: {
@@ -238,16 +230,21 @@ window.ZERO_COM_CLIENT_SEND = async ({ funcId, params }) => {
     body: JSON.stringify({ funcId, params }),
   });
   return await response.json();
-};
+});
 ```
 
 ### Server-side
 
-```javascript
-// src/server/api/phones.js
-import { serverFn } from 'zero-com';
+```typescript
+// src/server/api/phones.ts
+import { func, context } from 'zero-com';
 
-export const getPhones = serverFn(async (ctx, name) => {
+type Context = {
+    req: any,
+    res: any
+}
+
+export const getPhones = func(async (ctx: context<Context>, name: string) => {
   // In a real application, you would fetch this from a database
   const allPhones = [
     { name: 'iPhone 13', brand: 'Apple' },
@@ -260,10 +257,10 @@ export const getPhones = serverFn(async (ctx, name) => {
 
 ### Server
 
-```javascript
-// server.js
+```typescript
+// server.ts
 import express from 'express';
-import { execServerFn } from 'zero-com';
+import { handle } from 'zero-com';
 import './src/server/api/phones.js'; // Make sure to import the server-side modules
 
 const app = express();
@@ -271,17 +268,11 @@ app.use(express.json());
 
 app.post('/api', async (req, res) => {
   const { funcId, params } = req.body;
-  const func = global.ZERO_COM_SERVER_REGISTRY[funcId];
-
-  if (func) {
-    try {
-      const result = await execServerFn(func, { req, res }, params);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  } else {
-    res.status(404).json({ error: `Function with id ${funcId} not found.` });
+  try {
+    const result = await handle(funcId, { req, res }, params);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -304,12 +295,7 @@ module.exports = {
     path: __dirname + '/dist',
   },
   plugins: [
-    new ZeroComWebpackPlugin({
-      patterns: {
-        client: 'src/client/**',
-        server: 'src/server/api/**',
-      },
-    }),
+    new ZeroComWebpackPlugin(),
   ],
 };
 ```
@@ -327,12 +313,7 @@ export default {
     format: 'cjs',
   },
   plugins: [
-    zeroComRollupPlugin({
-      patterns: {
-        client: 'src/client/**',
-        server: 'src/server/api/**',
-      },
-    }),
+    zeroComRollupPlugin(),
   ],
 };
 ```

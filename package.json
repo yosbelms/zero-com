@@ -1,6 +1,6 @@
 {
   "name": "zero-com",
-  "version": "0.0.8",
+  "version": "1.0.0",
   "main": "index.js",
   "repository": "https://github.com/yosbelms/zero-com",
   "keywords": [
@@ -13,6 +13,8 @@
   ],
   "scripts": {
     "build": "npx tsc -d",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "find . -type f \\( -name \"*.js\" -o -name \"*.js.map\" -o -name \"*.d.ts\" -o -name \"*.d.ts.map\" \\) | grep -v \"./node_modules\" | xargs rm",
     "prepublishOnly": "npm run clean && npm run build"
   },
@@ -26,7 +28,8 @@
   "devDependencies": {
     "@types/webpack": "^5.28.5",
     "rollup": "^4.52.5",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.18"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
