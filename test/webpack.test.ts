@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { ArrowFunction, Project, SyntaxKind, CallExpression, Identifier, PropertyAccessExpression, SourceFile } from 'ts-morph'
 import ts from 'typescript'
-import { ServerFuncInfo, ServerFuncRegistry, ZERO_COM_CLIENT_SEND, ZERO_COM_SERVER_REGISTRY, formatFuncIdName, isFromLibrary, SERVER_FUNCTION_WRAPPER_NAME, CONTEXT_TYPE_NAME } from '../lib/common'
+import { ServerFuncInfo, ServerFuncRegistry, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, formatFuncIdName, isFromLibrary, SERVER_FUNCTION_WRAPPER_NAME, CONTEXT_TYPE_NAME } from '../lib/common'
 
 const fixturesDir = path.join(__dirname, '__fixtures__')
 
@@ -152,7 +152,7 @@ function transformCallSites(sourceFile: SourceFile, importedFuncs: Map<string, S
     if (!funcInfo) return
 
     const args = callExpr.getArguments().map(arg => arg.getText()).join(', ')
-    const newCall = `globalThis.${ZERO_COM_CLIENT_SEND}('${funcInfo.funcId}', [${args}])`
+    const newCall = `globalThis.${ZERO_COM_CLIENT_CALL}('${funcInfo.funcId}', [${args}])`
 
     callExpr.replaceWithText(newCall)
     modified = true
@@ -290,8 +290,8 @@ describe('ZeroComWebpackPlugin', () => {
       expect(modified).toBe(true)
 
       const result = sourceFile.getFullText()
-      expect(result).toContain(`globalThis.${ZERO_COM_CLIENT_SEND}('getUser@api.ts:`)
-      expect(result).toContain(`globalThis.${ZERO_COM_CLIENT_SEND}('createUser@api.ts:`)
+      expect(result).toContain(`globalThis.${ZERO_COM_CLIENT_CALL}('getUser@api.ts:`)
+      expect(result).toContain(`globalThis.${ZERO_COM_CLIENT_CALL}('createUser@api.ts:`)
     })
 
     it('should transform calls with correct arguments', () => {
@@ -303,8 +303,8 @@ describe('ZeroComWebpackPlugin', () => {
       transformCallSites(sourceFile, importedFuncs)
 
       const result = sourceFile.getFullText()
-      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_SEND\('getUser@api\.ts:\d+', \[userId\]\)/)
-      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_SEND\('createUser@api\.ts:\d+', \[name, email\]\)/)
+      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_CALL\('getUser@api\.ts:\d+', \[userId\]\)/)
+      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_CALL\('createUser@api\.ts:\d+', \[name, email\]\)/)
     })
 
     it('should not transform non-server-function calls', () => {
@@ -328,8 +328,8 @@ describe('ZeroComWebpackPlugin', () => {
       transformCallSites(sourceFile, importedFuncs)
 
       const result = sourceFile.getFullText()
-      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_SEND\('getUser@api\.ts:\d+', \[userId\]\)/)
-      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_SEND\('createUser@api\.ts:\d+', \[name, email\]\)/)
+      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_CALL\('getUser@api\.ts:\d+', \[userId\]\)/)
+      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_CALL\('createUser@api\.ts:\d+', \[name, email\]\)/)
     })
 
     it('should transform namespace function calls', () => {
@@ -341,8 +341,8 @@ describe('ZeroComWebpackPlugin', () => {
       transformCallSites(sourceFile, importedFuncs)
 
       const result = sourceFile.getFullText()
-      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_SEND\('getUser@api\.ts:\d+', \[userId\]\)/)
-      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_SEND\('createUser@api\.ts:\d+', \[name, email\]\)/)
+      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_CALL\('getUser@api\.ts:\d+', \[userId\]\)/)
+      expect(result).toMatch(/globalThis\.ZERO_COM_CLIENT_CALL\('createUser@api\.ts:\d+', \[name, email\]\)/)
     })
   })
 

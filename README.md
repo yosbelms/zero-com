@@ -72,30 +72,15 @@ import { getPhones } '../server/phones'
 
 Zero-com does not define any transport layer, it is up to you to create one or reuse your own. This means you have complete control over how data is sent between the client and server.
 
-### Communication Flow
-
-The following diagram illustrates the communication flow between the client and server:
-
-```
-+--------+      +----------------------------------+      +-------------+
-| Client |----->| globalThis.ZERO_COM_CLIENT_SEND  |----->| Your Server |
-+--------+      +----------------------------------+      +-------------+
-                                                                |
-                                                                v
-+--------+      +-------------------------+      +--------------------------------------+
-| Client |<-----| (Your custom transport) |<-----| globalThis.ZERO_COM_SERVER_REGISTRY  |
-+--------+      +-------------------------+      +--------------------------------------+
-```
-
 ### Client-side
 
-All messages from the client-side will be sent using the transport function you define. Import `send` from `zero-com` and pass your transport function.
+All messages from the client-side will be sent using the transport function you define. Import `call` from `zero-com` and pass your transport function.
 
 ```javascript
 // client/transport.js
-import { send } from 'zero-com';
+import { call } from 'zero-com';
 
-send(async (funcId, params) => {
+call(async (funcId, params) => {
   const response = await fetch('http://localhost:8000/api', {
     method: 'POST',
     headers: {
@@ -152,7 +137,7 @@ To pass context to a server function, you need to wrap the function in `func` an
 import { func, context } from 'zero-com';
 
 type MyContext = {
-    request: any
+  request: any
 }
 
 export const getPhones = func(async (ctx: context<MyContext>, name: string) => {
@@ -219,9 +204,9 @@ main();
 
 ```typescript
 // src/client/transport.ts
-import { send } from 'zero-com';
+import { call } from 'zero-com';
 
-send(async (funcId, params) => {
+call(async (funcId, params) => {
   const response = await fetch('http://localhost:8000/api', {
     method: 'POST',
     headers: {
@@ -240,8 +225,8 @@ send(async (funcId, params) => {
 import { func, context } from 'zero-com';
 
 type Context = {
-    req: any,
-    res: any
+  req: any,
+  res: any
 }
 
 export const getPhones = func(async (ctx: context<Context>, name: string) => {

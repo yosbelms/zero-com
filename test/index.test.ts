@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { func, execFunc, handle, send, context } from '../lib/runtime'
+import { func, execFunc, handle, call, context } from '../lib/runtime'
 
 beforeEach(() => {
   globalThis.ZERO_COM_SERVER_REGISTRY = {}
@@ -89,8 +89,8 @@ describe('handle()', () => {
   })
 })
 
-describe('send()', () => {
+describe('call()', () => {
   it('should throw if not transformed by plugin', () => {
-    expect(() => send(async () => ({}))).toThrow('send() was not transformed. Ensure the zero-com plugin is configured.')
+    expect(() => call(async () => ({}))).toThrow('call() was not transformed. Ensure the zero-com plugin is configured.')
   })
 })

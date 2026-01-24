@@ -17,11 +17,11 @@ export type ServerFuncInfo = {
 export type ServerFuncRegistry = Map<string, Map<string, ServerFuncInfo>>
 
 // Constants
-export const ZERO_COM_CLIENT_SEND = 'ZERO_COM_CLIENT_SEND'
+export const ZERO_COM_CLIENT_CALL = 'ZERO_COM_CLIENT_CALL'
 export const ZERO_COM_SERVER_REGISTRY = 'ZERO_COM_SERVER_REGISTRY'
 export const SERVER_FUNCTION_WRAPPER_NAME = 'func'
 export const HANDLE_NAME = 'handle'
-export const SEND_NAME = 'send'
+export const CALL_NAME = 'call'
 export const EXEC_FUNC_NAME = 'execFunc'
 export const CONTEXT_TYPE_NAME = 'context'
 export const LIBRARY_NAME = 'zero-com'
@@ -34,7 +34,7 @@ export const formatFuncIdName = (funcName: string, filePath: string, line: numbe
 export const generateCompilationId = (): string => String(Math.floor(Math.random() * 1000000))
 
 export const getReplacements = (compilationId: string) => [
-  { target: ZERO_COM_CLIENT_SEND, replacement: `__ZERO_COM_CLIENT_SEND_${compilationId}` },
+  { target: ZERO_COM_CLIENT_CALL, replacement: `__ZERO_COM_CLIENT_CALL_${compilationId}` },
   { target: ZERO_COM_SERVER_REGISTRY, replacement: `__ZERO_COM_SERVER_REGISTRY_${compilationId}` }
 ]
 
@@ -173,7 +173,7 @@ export const transformCallSites = (sourceFile: SourceFile, importedFuncs: Map<st
     if (!funcInfo) return
 
     const args = callExpr.getArguments().map(a => a.getText()).join(', ')
-    callExpr.replaceWithText(`globalThis.${ZERO_COM_CLIENT_SEND}('${funcInfo.funcId}', [${args}])`)
+    callExpr.replaceWithText(`globalThis.${ZERO_COM_CLIENT_CALL}('${funcInfo.funcId}', [${args}])`)
     modified = true
   })
 
@@ -206,12 +206,12 @@ export const transformSendCalls = (sourceFile: SourceFile): boolean => {
   sourceFile.forEachDescendant((node) => {
     if (node.getKind() !== SyntaxKind.CallExpression) return
     const callExpr = node as CallExpression
-    if (!isFromLibrary(callExpr, LIBRARY_NAME) || getCalleeName(callExpr) !== SEND_NAME) return
+    if (!isFromLibrary(callExpr, LIBRARY_NAME) || getCalleeName(callExpr) !== CALL_NAME) return
 
     const args = callExpr.getArguments()
     if (args.length < 1) return
 
-    callExpr.replaceWithText(`globalThis.${ZERO_COM_CLIENT_SEND} = ${args[0].getText()}`)
+    callExpr.replaceWithText(`globalThis.${ZERO_COM_CLIENT_CALL} = ${args[0].getText()}`)
     modified = true
   })
 

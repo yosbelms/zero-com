@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { Project, SyntaxKind } from 'ts-morph'
 import ts from 'typescript'
-import { formatFuncIdName, isFromLibrary, ZERO_COM_CLIENT_SEND, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME, CONTEXT_TYPE_NAME } from '../lib/common'
+import { formatFuncIdName, isFromLibrary, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME, CONTEXT_TYPE_NAME } from '../lib/common'
 
 function createSourceFile(content: string) {
   const project = new Project({
@@ -70,8 +70,8 @@ describe('isFromLibrary', () => {
 })
 
 describe('constants', () => {
-  it('should export ZERO_COM_CLIENT_SEND', () => {
-    expect(ZERO_COM_CLIENT_SEND).toBe('ZERO_COM_CLIENT_SEND')
+  it('should export ZERO_COM_CLIENT_CALL', () => {
+    expect(ZERO_COM_CLIENT_CALL).toBe('ZERO_COM_CLIENT_CALL')
   })
 
   it('should export ZERO_COM_SERVER_REGISTRY', () => {

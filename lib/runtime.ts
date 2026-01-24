@@ -1,7 +1,7 @@
 
 declare global {
   var ZERO_COM_SERVER_REGISTRY: { [funcId: string]: (...args: any[]) => any }
-  var ZERO_COM_CLIENT_SEND: (funcId: string, args: any[]) => Promise<any>
+  var ZERO_COM_CLIENT_CALL: (funcId: string, args: any[]) => Promise<any>
 }
 
 // Branded marker type for context parameter
@@ -48,9 +48,9 @@ export const handle = (
   throw new Error('handle() was not transformed. Ensure the zero-com plugin is configured.')
 }
 
-// User-facing function - transformed by plugin to globalThis.ZERO_COM_CLIENT_SEND = fn
-export const send = (
+// User-facing function - transformed by plugin to globalThis.ZERO_COM_CLIENT_CALL = fn
+export const call = (
   _fn: (funcId: string, args: any[]) => Promise<any>
 ): void => {
-  throw new Error('send() was not transformed. Ensure the zero-com plugin is configured.')
+  throw new Error('call() was not transformed. Ensure the zero-com plugin is configured.')
 }
