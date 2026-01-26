@@ -7,6 +7,7 @@ The 0 bytes utility for transparently communicating client and server in full-st
 - [Usage](#usage)
 - [Transport layer](#transport-layer)
 - [Context](#context)
+- [Server-to-Server Calls](#server-to-server-calls)
 - [Plugin options](#plugin-options)
 - [Complete Example](#complete-example)
 
@@ -57,7 +58,7 @@ Server side
 // server/phones.ts
 import { func } from 'zero-com';
 
-export const getPhones = func(async () => { 
+export const getPhones = func(async () => {
   // ...
 })
 ```
@@ -100,8 +101,8 @@ On the server-side, you need to create a handler that receives messages from the
 // server/api.js
 import { handle } from 'zero-com';
 
-const someCustomHandler = async (message) => {
-  return await handle(message.funcId, null, message.params);
+const someCustomHandler = async (message, ctx) => {
+  return await handle(message.funcId, ctx, message.params);
 };
 
 // Example of how to use the handler with an Express server
@@ -112,7 +113,8 @@ app.use(express.json());
 
 app.post('/api', async (req, res) => {
   try {
-    const result = await someCustomHandler(req.body);
+    const ctx = { req, res };
+    const result = await someCustomHandler(req.body, ctx);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -126,41 +128,89 @@ app.listen(8000, () => {
 
 ## Context
 
-Often you want to pass a context-related object to the server functions to have access to data like the request, response, session, etc. Zero-com provides a simple way to do this.
+Often you want to access context-related data in your server functions, such as the request, response, session, etc. Zero-com provides a simple way to do this using the `context()` function.
 
-### Passing Context to Server Functions
+### Accessing Context in Server Functions
 
-To pass context to a server function, you need to wrap the function in `func` and type the first parameter as `context`. The plugin detects this type and handles it accordingly.
+To access context in a server function, call the `context<T>()` function inside your function body. The context is automatically available when the function is called via `handle()`.
 
 ```typescript
 // server/api/phones.ts
 import { func, context } from 'zero-com';
 
 type MyContext = {
-  request: any
+  req: any;
+  res: any;
+  userId: string;
 }
 
-export const getPhones = func(async (ctx: context<MyContext>, name: string) => {
-  // ctx is the context object passed from the server
-  console.log(ctx.request.headers);
+export const getPhones = func(async (name: string) => {
+  // Get the context inside the function
+  const ctx = context<MyContext>();
+
+  console.log('User:', ctx.userId);
+  console.log('Headers:', ctx.req.headers);
+
   // ... your code
 });
 ```
 
 ### Providing Context on the Server
 
-You can pass the context to `handle` when you execute the server function.
+Pass the context as the second argument to `handle()`. The context will be available to the function and any nested server function calls.
 
 ```javascript
 // server/api.js
 import { handle } from 'zero-com';
 
-const myHandler = (request, response, message) => {
-  const ctx = { request, response };
-  // pass context on exec
-  return handle(message.funcId, ctx, message.params);
-};
+app.post('/api', async (req, res) => {
+  const { funcId, params } = req.body;
+
+  // Create context with request data
+  const ctx = {
+    req,
+    res,
+    userId: req.headers['x-user-id']
+  };
+
+  // Pass context to handle - it will be available via context()
+  const result = await handle(funcId, ctx, params);
+  res.json(result);
+});
 ```
+
+## Server-to-Server Calls
+
+When one server function calls another server function, the call bypasses the transport layer and executes directly. Context is automatically propagated to nested calls.
+
+```typescript
+// server/api/user.ts
+import { func, context } from 'zero-com';
+
+export const getFirstName = func(async () => {
+  const ctx = context<{ userId: string }>();
+  // ... fetch first name from database
+  return 'John';
+});
+
+// server/api/profile.ts
+import { func, context } from 'zero-com';
+import { getFirstName } from './user';
+
+export const getFullName = func(async (lastName: string) => {
+  // This calls getFirstName directly (no transport layer)
+  // Context is automatically propagated
+  const firstName = await getFirstName();
+  return `${firstName} ${lastName}`;
+});
+```
+
+When `getFullName` is called from the client:
+1. The call goes through the transport layer to the server
+2. `handle()` sets up the context
+3. `getFullName` executes and calls `getFirstName`
+4. `getFirstName` executes directly (no transport) with the same context
+5. Both functions can access `context()` with the same data
 
 ## Plugin options
 
@@ -225,11 +275,15 @@ call(async (funcId, params) => {
 import { func, context } from 'zero-com';
 
 type Context = {
-  req: any,
-  res: any
+  req: any;
+  res: any;
 }
 
-export const getPhones = func(async (ctx: context<Context>, name: string) => {
+export const getPhones = func(async (name: string) => {
+  // Access context when needed
+  const ctx = context<Context>();
+  console.log('Request from:', ctx.req.ip);
+
   // In a real application, you would fetch this from a database
   const allPhones = [
     { name: 'iPhone 13', brand: 'Apple' },

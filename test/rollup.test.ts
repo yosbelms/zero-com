@@ -23,7 +23,7 @@ describe('zeroComRollupPlugin', () => {
   })
 
   describe('production mode (development: false)', () => {
-    it('should transform handle() to inlined requireContext check', async () => {
+    it('should transform handle() to use contextStorage.run()', async () => {
       const plugin = zeroComRollupPlugin({ development: false })
       const { load } = plugin as any
 
@@ -46,8 +46,8 @@ describe('zeroComRollupPlugin', () => {
       expect(result).toBeTruthy()
       // Result is now { code, map } object
       const output = typeof result === 'string' ? result : result.code
-      // Check that handle() was transformed to inline the requireContext check
-      expect(output).toContain('__fn.requireContext')
+      // Check that handle() was transformed to use contextStorage.run()
+      expect(output).toContain('ZERO_COM_CONTEXT_STORAGE')
       expect(output).toContain('ZERO_COM_SERVER_REGISTRY')
     })
   })

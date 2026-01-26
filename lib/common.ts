@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import MagicString from 'magic-string'
 import type { SourceMap } from 'magic-string'
-import { ArrowFunction, CallExpression, Identifier, Project, PropertyAccessExpression, SourceFile, SyntaxKind, ts } from 'ts-morph'
+import { CallExpression, Identifier, Project, PropertyAccessExpression, SourceFile, SyntaxKind, ts } from 'ts-morph'
 
 // Replacement type for collecting transformations
 export type Replacement = { start: number; end: number; content: string }
@@ -16,7 +16,6 @@ export type ServerFuncInfo = {
   funcId: string
   filePath: string
   exportName: string
-  requireContext: boolean
 }
 
 export type ServerFuncRegistry = Map<string, Map<string, ServerFuncInfo>>
@@ -24,10 +23,10 @@ export type ServerFuncRegistry = Map<string, Map<string, ServerFuncInfo>>
 // Constants
 export const ZERO_COM_CLIENT_CALL = 'ZERO_COM_CLIENT_CALL'
 export const ZERO_COM_SERVER_REGISTRY = 'ZERO_COM_SERVER_REGISTRY'
+export const ZERO_COM_CONTEXT_STORAGE = 'ZERO_COM_CONTEXT_STORAGE'
 export const SERVER_FUNCTION_WRAPPER_NAME = 'func'
 export const HANDLE_NAME = 'handle'
 export const CALL_NAME = 'call'
-export const CONTEXT_TYPE_NAME = 'context'
 export const LIBRARY_NAME = 'zero-com'
 export const FILE_EXTENSIONS = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs']
 
@@ -39,7 +38,8 @@ export const generateCompilationId = (): string => String(Math.floor(Math.random
 
 export const getReplacements = (compilationId: string) => [
   { target: ZERO_COM_CLIENT_CALL, replacement: `__ZERO_COM_CLIENT_CALL_${compilationId}` },
-  { target: ZERO_COM_SERVER_REGISTRY, replacement: `__ZERO_COM_SERVER_REGISTRY_${compilationId}` }
+  { target: ZERO_COM_SERVER_REGISTRY, replacement: `__ZERO_COM_SERVER_REGISTRY_${compilationId}` },
+  { target: ZERO_COM_CONTEXT_STORAGE, replacement: `__ZERO_COM_CONTEXT_STORAGE_${compilationId}` }
 ]
 
 // Utilities
@@ -123,15 +123,11 @@ const scanFileForServerFunctions = (filePath: string, contextDir: string, regist
     const args = callExpr.getArguments()
     if (args.length !== 1 || args[0].getKind() !== SyntaxKind.ArrowFunction) continue
 
-    const params = (args[0] as ArrowFunction).getParameters()
-    const requireContext = params.length > 0 && params[0].getTypeNode()?.getText().startsWith(CONTEXT_TYPE_NAME) || false
-
     const exportName = decl.getName()
     fileRegistry.set(exportName, {
       funcId: formatFuncIdName(exportName, path.relative(contextDir, filePath), decl.getStartLineNumber()),
       filePath,
       exportName,
-      requireContext,
     })
   }
 
@@ -201,10 +197,11 @@ export const collectHandleCallReplacements = (sourceFile: SourceFile): Replaceme
     const funcId = args[0].getText()
     const ctx = args[1].getText()
     const argsArray = args[2].getText()
+    // Use contextStorage.run() to make context available via context() calls
     replacements.push({
       start: callExpr.getStart(),
       end: callExpr.getEnd(),
-      content: `((__fn) => __fn.requireContext ? __fn(${ctx}, ...${argsArray}) : __fn(...${argsArray}))(globalThis.${ZERO_COM_SERVER_REGISTRY}[${funcId}])`
+      content: `globalThis.${ZERO_COM_CONTEXT_STORAGE}.run(${ctx}, () => globalThis.${ZERO_COM_SERVER_REGISTRY}[${funcId}](...${argsArray}))`
     })
   })
 
@@ -280,15 +277,9 @@ export const applyReplacementsWithMap = (
 }
 
 export const appendRegistryCode = (sourceFile: SourceFile, fileRegistry: Map<string, ServerFuncInfo>): string => {
-  // Generate registration code for each server function.
-  // We set requireContext based on compile-time analysis of the function's first parameter type.
-  // If the first param is context<T>, requireContext = true, otherwise false.
-  // This allows handle() at runtime to know whether to inject the context as the first argument.
+  // Generate registration code for each server function
   const registrations = Array.from(fileRegistry.values())
-    .map(info =>
-      `globalThis.${ZERO_COM_SERVER_REGISTRY}['${info.funcId}'] = ${info.exportName};\n` +
-      `${info.exportName}.requireContext = ${info.requireContext};`
-    )
+    .map(info => `globalThis.${ZERO_COM_SERVER_REGISTRY}['${info.funcId}'] = ${info.exportName};`)
     .join('\n')
 
   return `${sourceFile.getFullText()}

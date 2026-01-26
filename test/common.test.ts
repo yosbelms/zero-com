@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { Project, SyntaxKind } from 'ts-morph'
 import ts from 'typescript'
-import { formatFuncIdName, isFromLibrary, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME, CONTEXT_TYPE_NAME } from '../lib/common'
+import { formatFuncIdName, isFromLibrary, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME } from '../lib/common'
 
 function createSourceFile(content: string) {
   const project = new Project({
@@ -80,9 +80,5 @@ describe('constants', () => {
 
   it('should export SERVER_FUNCTION_WRAPPER_NAME', () => {
     expect(SERVER_FUNCTION_WRAPPER_NAME).toBe('func')
-  })
-
-  it('should export CONTEXT_TYPE_NAME', () => {
-    expect(CONTEXT_TYPE_NAME).toBe('context')
   })
 })

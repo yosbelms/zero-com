@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import path from 'path'
-import { ArrowFunction, Project, SyntaxKind, CallExpression, Identifier, PropertyAccessExpression, SourceFile } from 'ts-morph'
+import { Project, SyntaxKind, CallExpression, Identifier, PropertyAccessExpression, SourceFile } from 'ts-morph'
 import ts from 'typescript'
-import { ServerFuncInfo, ServerFuncRegistry, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, formatFuncIdName, isFromLibrary, SERVER_FUNCTION_WRAPPER_NAME, CONTEXT_TYPE_NAME } from '../lib/common'
+import { ServerFuncInfo, ServerFuncRegistry, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, formatFuncIdName, isFromLibrary, SERVER_FUNCTION_WRAPPER_NAME } from '../lib/common'
 
 const fixturesDir = path.join(__dirname, '__fixtures__')
 
@@ -48,21 +48,6 @@ function scanFileForServerFunctions(filePath: string, contextDir: string): Map<s
       return // Not a valid func() call
     }
 
-    const arrowFunc = args[0] as ArrowFunction
-    const params = arrowFunc.getParameters()
-    let requireContext = false
-
-    // Check if first parameter has Context type annotation
-    if (params.length > 0) {
-      const firstParam = params[0]
-      const typeNode = firstParam.getTypeNode()
-      if (typeNode) {
-        const typeText = typeNode.getText()
-        // Check if first param type starts with Context (e.g., Context, Context<{userId: string}>)
-        requireContext = typeText.startsWith(CONTEXT_TYPE_NAME)
-      }
-    }
-
     const exportName = decl.getName()
     const lineNumber = decl.getStartLineNumber()
     const relativePath = path.relative(contextDir, filePath)
@@ -72,7 +57,6 @@ function scanFileForServerFunctions(filePath: string, contextDir: string): Map<s
       funcId,
       filePath,
       exportName,
-      requireContext,
     })
   })
 
@@ -192,15 +176,6 @@ describe('ZeroComWebpackPlugin', () => {
       const registry = scanFileForServerFunctions(apiPath, fixturesDir)
 
       expect(registry.has('helperFunction')).toBe(false)
-    })
-
-    it('should detect requireContext flag from Context type annotation', () => {
-      const apiPath = path.join(fixturesDir, 'api.ts')
-      const registry = scanFileForServerFunctions(apiPath, fixturesDir)
-
-      expect(registry.get('getUser')?.requireContext).toBe(false)
-      expect(registry.get('createUser')?.requireContext).toBe(false)
-      expect(registry.get('getUserWithContext')?.requireContext).toBe(true)
     })
 
     it('should generate correct funcId format', () => {

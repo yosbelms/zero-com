@@ -8,7 +8,8 @@ export const createUser = func((name: string, email: string) => {
   return { id: '123', name, email }
 })
 
-export const getUserWithContext = func((ctx: context<{ userId: string }>, id: string) => {
+export const getUserWithContext = func((id: string) => {
+  const ctx = context<{ userId: string }>()
   return { id, requestedBy: ctx.userId }
 })
 

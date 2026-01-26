@@ -1,54 +1,84 @@
-
 declare global {
   var ZERO_COM_SERVER_REGISTRY: { [funcId: string]: (...args: any[]) => any }
-  var ZERO_COM_CLIENT_CALL: (funcId: string, args: any[]) => Promise<any>
+  var ZERO_COM_CLIENT_CALL: (funcId: string, args: any[]) => any
+  var ZERO_COM_CONTEXT_STORAGE: { run: <T>(ctx: any, fn: () => T) => T; getStore: () => any } | undefined
 }
 
-// Branded marker type for context parameter
-declare const contextBrand: unique symbol
-export type context<T = unknown> = T & { readonly [contextBrand]: never }
+// Context storage - only available on server (Node.js)
+// Lazily initialized to avoid importing async_hooks on client
+function getContextStorage() {
+  if (!globalThis.ZERO_COM_CONTEXT_STORAGE) {
+    try {
+      // Dynamic import to avoid bundling async_hooks for browser
+      const { AsyncLocalStorage } = require('async_hooks')
+      globalThis.ZERO_COM_CONTEXT_STORAGE = new AsyncLocalStorage()
+    } catch {
+      // Browser environment - context storage not available
+      globalThis.ZERO_COM_CONTEXT_STORAGE = undefined
+    }
+  }
+  return globalThis.ZERO_COM_CONTEXT_STORAGE
+}
 
-// Type helper to remove context param from function signature
-type RemoveContextParam<F> =
-  F extends (ctx: infer C, ...args: infer A) => infer R
-  ? C extends context<unknown>
-    ? (...args: A) => R
-    : F
-  : F
+// Get the current context - call this inside server functions
+export function context<T = unknown>(): T {
+  const storage = getContextStorage()
+  if (!storage) {
+    throw new Error('context() is only available on the server')
+  }
+  const ctx = storage.getStore()
+  if (ctx === undefined) {
+    throw new Error('context() called outside of a server function')
+  }
+  return ctx
+}
 
-// Single unified signature - Context detection happens via type
-export function func<F extends (...args: any[]) => any>(fn: F): RemoveContextParam<F>
+// Default server-side implementation: call directly from registry
+// This enables server functions to call other server functions without transport
+if (typeof globalThis.ZERO_COM_CLIENT_CALL === 'undefined') {
+  globalThis.ZERO_COM_CLIENT_CALL = (funcId: string, args: any[]) => {
+    const storage = getContextStorage()
+    if (!storage) {
+      throw new Error('Server function called on client without transport configured. Call call() first.')
+    }
+    const ctx = storage.getStore()
+    if (ctx === undefined) {
+      throw new Error('Server function called outside of request context')
+    }
+    const fn = globalThis.ZERO_COM_SERVER_REGISTRY?.[funcId]
+    if (!fn) throw new Error(`Function not found: ${funcId}`)
+    return fn(...args)
+  }
+}
 
-// Implementation
-// In development mode: works at runtime, returns the function as-is.
-// In production mode: transformed by plugin to just the inner function.
-// The plugin appends code to register the function and set requireContext.
-export function func(fn: (...args: any[]) => any): (...args: any[]) => any {
+// func() just returns the function as-is
+// In production mode: transformed by plugin to just the inner function
+export function func<F extends (...args: any[]) => any>(fn: F): F {
   return fn
 }
 
-// In development mode: works at runtime, looks up function and calls it.
-// In production mode: transformed by plugin to inline code.
+// handle() stores context in AsyncLocalStorage and calls the function
+// In production mode: transformed by plugin to inline code
 export const handle = (
   funcId: string,
   ctx: any,
   args: any[]
 ): any => {
-  const fn = globalThis.ZERO_COM_SERVER_REGISTRY[funcId] as any
+  const fn = globalThis.ZERO_COM_SERVER_REGISTRY?.[funcId]
   if (!fn) {
     throw new Error(`Function not found in registry: ${funcId}`)
   }
-  if (fn.requireContext) {
-    return fn(ctx, ...args)
-  } else {
-    return fn(...args)
+  const storage = getContextStorage()
+  if (!storage) {
+    throw new Error('handle() is only available on the server')
   }
+  return storage.run(ctx, () => fn(...args))
 }
 
-// In development mode: works at runtime, sets the client call handler.
-// In production mode: transformed by plugin to assignment.
+// Client calls this to set up transport (overrides default server-side behavior)
+// In production mode: transformed by plugin to assignment
 export const call = (
-  fn: (funcId: string, args: any[]) => Promise<any>
+  fn: (funcId: string, args: any[]) => any
 ): void => {
   globalThis.ZERO_COM_CLIENT_CALL = fn
 }
