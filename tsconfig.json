@@ -103,10 +103,13 @@
     /* Completeness */
     // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
     "skipLibCheck": true, /* Skip type checking all .d.ts files. */
+    "types": ["node"],
     "paths": {
       "zero-com": [
-        "./lib/index.ts"
+        "./index.ts"
       ]
     }
-  }
+  },
+  "include": ["index.ts", "lib/**/*", "test/**/*"],
+  "exclude": ["node_modules"]
 }

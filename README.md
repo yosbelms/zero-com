@@ -1,6 +1,6 @@
 # Zero-com
 
-A ~420 Bytes utility for transparently communicating client and server in full-stack projects through compile-time code transformation, with end-to-end static type checking.
+The 0 bytes utility for transparently communicating client and server in full-stack projects through compile-time code transformation, with end-to-end static type checking.
 
 ## Table of Contents
 

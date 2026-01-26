@@ -36,7 +36,7 @@ export class ZeroComWebpackPlugin {
       enforce: 'pre',
       use: [{
         loader: loaderPath,
-        options: { registry: this.registry }
+        options: { registry: this.registry, development: this.options.development }
       }]
     }
 

@@ -1,6 +1,6 @@
 {
   "name": "zero-com",
-  "version": "1.3.0",
+  "version": "1.6.5",
   "main": "index.js",
   "repository": "https://github.com/yosbelms/zero-com",
   "keywords": [
@@ -12,7 +12,7 @@
     "client"
   ],
   "scripts": {
-    "build": "npx tsc -d",
+    "build": "npx tsc -p tsconfig.build.json -d",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "find . -type f \\( -name \"*.js\" -o -name \"*.js.map\" -o -name \"*.d.ts\" -o -name \"*.d.ts.map\" \\) | grep -v \"./node_modules\" | xargs rm",
@@ -22,10 +22,12 @@
   "license": "MIT",
   "description": "",
   "dependencies": {
+    "magic-string": "^0.30.21",
     "minimatch": "^10.0.1",
     "ts-morph": "^26.0.0"
   },
   "devDependencies": {
+    "@types/node": "^25.0.10",
     "@types/webpack": "^5.28.5",
     "rollup": "^4.52.5",
     "typescript": "^5.8.3",

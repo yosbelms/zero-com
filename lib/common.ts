@@ -1,6 +1,11 @@
 import fs from 'fs'
 import path from 'path'
+import MagicString from 'magic-string'
+import type { SourceMap } from 'magic-string'
 import { ArrowFunction, CallExpression, Identifier, Project, PropertyAccessExpression, SourceFile, SyntaxKind, ts } from 'ts-morph'
+
+// Replacement type for collecting transformations
+export type Replacement = { start: number; end: number; content: string }
 
 // Types
 export type Options = {
@@ -22,7 +27,6 @@ export const ZERO_COM_SERVER_REGISTRY = 'ZERO_COM_SERVER_REGISTRY'
 export const SERVER_FUNCTION_WRAPPER_NAME = 'func'
 export const HANDLE_NAME = 'handle'
 export const CALL_NAME = 'call'
-export const EXEC_FUNC_NAME = 'execFunc'
 export const CONTEXT_TYPE_NAME = 'context'
 export const LIBRARY_NAME = 'zero-com'
 export const FILE_EXTENSIONS = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs']
@@ -160,10 +164,10 @@ export const getImportedServerFunctions = (sourceFile: SourceFile, registry: Ser
   return importedFuncs
 }
 
-// Transformations
-export const transformCallSites = (sourceFile: SourceFile, importedFuncs: Map<string, ServerFuncInfo>): boolean => {
-  if (importedFuncs.size === 0) return false
-  let modified = false
+// Transformations - collect replacements instead of modifying AST
+export const collectCallSiteReplacements = (sourceFile: SourceFile, importedFuncs: Map<string, ServerFuncInfo>): Replacement[] => {
+  if (importedFuncs.size === 0) return []
+  const replacements: Replacement[] = []
 
   sourceFile.forEachDescendant((node) => {
     if (node.getKind() !== SyntaxKind.CallExpression) return
@@ -173,15 +177,18 @@ export const transformCallSites = (sourceFile: SourceFile, importedFuncs: Map<st
     if (!funcInfo) return
 
     const args = callExpr.getArguments().map(a => a.getText()).join(', ')
-    callExpr.replaceWithText(`globalThis.${ZERO_COM_CLIENT_CALL}('${funcInfo.funcId}', [${args}])`)
-    modified = true
+    replacements.push({
+      start: callExpr.getStart(),
+      end: callExpr.getEnd(),
+      content: `globalThis.${ZERO_COM_CLIENT_CALL}('${funcInfo.funcId}', [${args}])`
+    })
   })
 
-  return modified
+  return replacements
 }
 
-export const transformHandleCalls = (sourceFile: SourceFile): boolean => {
-  let modified = false
+export const collectHandleCallReplacements = (sourceFile: SourceFile): Replacement[] => {
+  const replacements: Replacement[] = []
 
   sourceFile.forEachDescendant((node) => {
     if (node.getKind() !== SyntaxKind.CallExpression) return
@@ -191,17 +198,21 @@ export const transformHandleCalls = (sourceFile: SourceFile): boolean => {
     const args = callExpr.getArguments()
     if (args.length < 3) return
 
-    callExpr.replaceWithText(
-      `${EXEC_FUNC_NAME}(globalThis.${ZERO_COM_SERVER_REGISTRY}[${args[0].getText()}], ${args[1].getText()}, ${args[2].getText()})`
-    )
-    modified = true
+    const funcId = args[0].getText()
+    const ctx = args[1].getText()
+    const argsArray = args[2].getText()
+    replacements.push({
+      start: callExpr.getStart(),
+      end: callExpr.getEnd(),
+      content: `((__fn) => __fn.requireContext ? __fn(${ctx}, ...${argsArray}) : __fn(...${argsArray}))(globalThis.${ZERO_COM_SERVER_REGISTRY}[${funcId}])`
+    })
   })
 
-  return modified
+  return replacements
 }
 
-export const transformSendCalls = (sourceFile: SourceFile): boolean => {
-  let modified = false
+export const collectSendCallReplacements = (sourceFile: SourceFile): Replacement[] => {
+  const replacements: Replacement[] = []
 
   sourceFile.forEachDescendant((node) => {
     if (node.getKind() !== SyntaxKind.CallExpression) return
@@ -211,31 +222,94 @@ export const transformSendCalls = (sourceFile: SourceFile): boolean => {
     const args = callExpr.getArguments()
     if (args.length < 1) return
 
-    callExpr.replaceWithText(`globalThis.${ZERO_COM_CLIENT_CALL} = ${args[0].getText()}`)
-    modified = true
+    replacements.push({
+      start: callExpr.getStart(),
+      end: callExpr.getEnd(),
+      content: `globalThis.${ZERO_COM_CLIENT_CALL} = ${args[0].getText()}`
+    })
   })
 
-  return modified
+  return replacements
+}
+
+// Collect func(fn) replacements to just fn.
+// The func() wrapper is only needed for type-level transformation (RemoveContextParam).
+// At runtime, we just need the raw function. The registration code (appendRegistryCode)
+// will set requireContext on the function based on compile-time analysis.
+export const collectFuncCallReplacements = (sourceFile: SourceFile): Replacement[] => {
+  const replacements: Replacement[] = []
+
+  sourceFile.forEachDescendant((node) => {
+    if (node.getKind() !== SyntaxKind.CallExpression) return
+    const callExpr = node as CallExpression
+    if (!isFromLibrary(callExpr, LIBRARY_NAME) || getCalleeName(callExpr) !== SERVER_FUNCTION_WRAPPER_NAME) return
+
+    const args = callExpr.getArguments()
+    if (args.length !== 1) return
+
+    // Replace func(fn) with just fn
+    replacements.push({
+      start: callExpr.getStart(),
+      end: callExpr.getEnd(),
+      content: args[0].getText()
+    })
+  })
+
+  return replacements
+}
+
+// Apply collected replacements using MagicString for sourcemap support
+export const applyReplacementsWithMap = (
+  source: string,
+  replacements: Replacement[],
+  filePath: string
+): { code: string; map: SourceMap } => {
+  const s = new MagicString(source)
+
+  // Sort replacements by start position descending to preserve positions
+  const sorted = [...replacements].sort((a, b) => b.start - a.start)
+
+  for (const { start, end, content } of sorted) {
+    s.overwrite(start, end, content)
+  }
+
+  return {
+    code: s.toString(),
+    map: s.generateMap({ source: filePath, includeContent: true, hires: true })
+  }
 }
 
 export const appendRegistryCode = (sourceFile: SourceFile, fileRegistry: Map<string, ServerFuncInfo>): string => {
+  // Generate registration code for each server function.
+  // We set requireContext based on compile-time analysis of the function's first parameter type.
+  // If the first param is context<T>, requireContext = true, otherwise false.
+  // This allows handle() at runtime to know whether to inject the context as the first argument.
   const registrations = Array.from(fileRegistry.values())
-    .map(info => `globalThis.${ZERO_COM_SERVER_REGISTRY}['${info.funcId}'] = ${info.exportName}`)
-    .join(';\n')
+    .map(info =>
+      `globalThis.${ZERO_COM_SERVER_REGISTRY}['${info.funcId}'] = ${info.exportName};\n` +
+      `${info.exportName}.requireContext = ${info.requireContext};`
+    )
+    .join('\n')
 
   return `${sourceFile.getFullText()}
 if (!globalThis.${ZERO_COM_SERVER_REGISTRY}) globalThis.${ZERO_COM_SERVER_REGISTRY} = Object.create(null);
-${registrations};`
+${registrations}`
 }
 
 // Main transformation orchestrator
-export type TransformResult = { content: string; transformed: boolean }
+export type TransformResult = { content: string; transformed: boolean; map?: SourceMap }
+
+export type TransformOptions = {
+  development?: boolean
+}
 
 export const transformSourceFile = (
   filePath: string,
   content: string,
-  registry: ServerFuncRegistry
+  registry: ServerFuncRegistry,
+  options: TransformOptions = {}
 ): TransformResult => {
+  const { development = true } = options
   const project = createProject()
   const sourceFile = project.createSourceFile(filePath, content, { overwrite: true })
 
@@ -248,16 +322,40 @@ export const transformSourceFile = (
     fileRegistry.forEach((_, name) => importedFuncs.delete(name))
   }
 
-  const callsTransformed = transformCallSites(sourceFile, importedFuncs)
-  const handleTransformed = transformHandleCalls(sourceFile)
-  const sendTransformed = transformSendCalls(sourceFile)
+  // Collect all replacements
+  const replacements: Replacement[] = []
 
+  // Always collect client call site replacements (needed in both dev and prod)
+  replacements.push(...collectCallSiteReplacements(sourceFile, importedFuncs))
+
+  // In production mode, collect handle(), call(), and func() replacements.
+  // In development mode, these work at runtime via ZERO_COM_DEV_MODE flag.
+  if (!development) {
+    replacements.push(...collectHandleCallReplacements(sourceFile))
+    replacements.push(...collectSendCallReplacements(sourceFile))
+  }
+
+  // Handle server function files
   if (isServerFunctionFile) {
+    // In production mode, strip func() wrappers
+    if (!development) {
+      replacements.push(...collectFuncCallReplacements(sourceFile))
+    }
+
+    // Apply replacements and append registry code
+    if (replacements.length > 0) {
+      const { code, map } = applyReplacementsWithMap(content, replacements, filePath)
+      // Create a new source file from the transformed code to append registry
+      const transformedSourceFile = project.createSourceFile(filePath + '.transformed', code, { overwrite: true })
+      return { content: appendRegistryCode(transformedSourceFile, fileRegistry), transformed: true, map }
+    }
+
     return { content: appendRegistryCode(sourceFile, fileRegistry), transformed: true }
   }
 
-  if (callsTransformed || handleTransformed || sendTransformed) {
-    return { content: sourceFile.getFullText(), transformed: true }
+  if (replacements.length > 0) {
+    const { code, map } = applyReplacementsWithMap(content, replacements, filePath)
+    return { content: code, transformed: true, map }
   }
 
   return { content, transformed: false }

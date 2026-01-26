@@ -20,18 +20,24 @@ type RemoveContextParam<F> =
 export function func<F extends (...args: any[]) => any>(fn: F): RemoveContextParam<F>
 
 // Implementation
+// In development mode: works at runtime, returns the function as-is.
+// In production mode: transformed by plugin to just the inner function.
+// The plugin appends code to register the function and set requireContext.
 export function func(fn: (...args: any[]) => any): (...args: any[]) => any {
-  (fn as any).requireContext = true
   return fn
 }
 
-// Internal implementation - receives the actual function from registry
-export const execFunc = (
-  sfn: ReturnType<typeof func>,
+// In development mode: works at runtime, looks up function and calls it.
+// In production mode: transformed by plugin to inline code.
+export const handle = (
+  funcId: string,
   ctx: any,
   args: any[]
-): ReturnType<typeof sfn> => {
-  const fn = sfn as any
+): any => {
+  const fn = globalThis.ZERO_COM_SERVER_REGISTRY[funcId] as any
+  if (!fn) {
+    throw new Error(`Function not found in registry: ${funcId}`)
+  }
   if (fn.requireContext) {
     return fn(ctx, ...args)
   } else {
@@ -39,18 +45,10 @@ export const execFunc = (
   }
 }
 
-// User-facing function - transformed by plugin to execFunc(globalThis.ZERO_COM_SERVER_REGISTRY[funcId], ctx, args)
-export const handle = (
-  _funcId: string,
-  _ctx: any,
-  _args: any[]
-): any => {
-  throw new Error('handle() was not transformed. Ensure the zero-com plugin is configured.')
-}
-
-// User-facing function - transformed by plugin to globalThis.ZERO_COM_CLIENT_CALL = fn
+// In development mode: works at runtime, sets the client call handler.
+// In production mode: transformed by plugin to assignment.
 export const call = (
-  _fn: (funcId: string, args: any[]) => Promise<any>
+  fn: (funcId: string, args: any[]) => Promise<any>
 ): void => {
-  throw new Error('call() was not transformed. Ensure the zero-com plugin is configured.')
+  globalThis.ZERO_COM_CLIENT_CALL = fn
 }

@@ -42,11 +42,12 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin {
       if (!this.getModuleInfo(id)?.meta?.needsTransform || !fs.existsSync(id)) return null
 
       const content = fs.readFileSync(id, 'utf8')
-      const result = transformSourceFile(id, content, registry)
+      const result = transformSourceFile(id, content, registry, { development })
       if (!result.transformed) return null
 
       console.log(`[ZeroComRollupPlugin] Transformed: ${path.relative(process.cwd(), id)}`)
-      return emitToJs(id, result.content)
+      const code = emitToJs(id, result.content)
+      return { code, map: result.map ?? null }
     },
 
     renderChunk(code: string) {
