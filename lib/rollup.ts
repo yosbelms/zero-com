@@ -68,7 +68,7 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
     // Returns transformed TypeScript — Vite's esbuild handles TS→JS.
     transform(code: string, id: string, viteOptions?: unknown) {
       if (!isVite) return null
-      if (id.includes('node_modules') || !/\.(ts|tsx|js|jsx|mjs)$/.test(id)) return null
+      if (id[0] === '\0' || id.includes('node_modules') || !/\.(ts|tsx|js|jsx|mjs)$/.test(id)) return null
 
       // Derive effective target: explicit option takes precedence, otherwise infer from Vite's ssr flag
       const ssr = typeof viteOptions === 'object' && viteOptions !== null && 'ssr' in viteOptions
