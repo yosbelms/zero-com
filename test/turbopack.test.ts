@@ -245,6 +245,56 @@ export const getUser = func((id: string) => {
     expect(result.content).toContain(`globalThis.${ZERO_COM_SERVER_REGISTRY}`)
   })
 
+  it('should generate client stubs when target is client', () => {
+    const apiPath = writeFixture('api.ts', `
+import { func } from 'zero-com'
+export const getUser = func((id: string) => {
+  return { id, name: 'Test' }
+})
+export const createUser = func((name: string) => {
+  return { name }
+})
+`)
+    const source = fs.readFileSync(apiPath, 'utf8')
+    const ctx = createLoaderContext({
+      resourcePath: apiPath,
+      rootContext: tempDir,
+      options: { development: true, target: 'client' },
+    })
+
+    turbopackLoader.call(ctx as any, source)
+    const result = ctx.getResult()!
+
+    expect(result.err).toBeNull()
+    expect(result.content).toContain(`globalThis.${ZERO_COM_CLIENT_CALL}`)
+    expect(result.content).not.toContain(`globalThis.${ZERO_COM_SERVER_REGISTRY}`)
+    expect(result.content).not.toContain('import ')
+    expect(result.content).toContain('export const getUser')
+    expect(result.content).toContain('export const createUser')
+  })
+
+  it('should keep registry code when target is server', () => {
+    const apiPath = writeFixture('api.ts', `
+import { func } from 'zero-com'
+export const getUser = func((id: string) => {
+  return { id, name: 'Test' }
+})
+`)
+    const source = fs.readFileSync(apiPath, 'utf8')
+    const ctx = createLoaderContext({
+      resourcePath: apiPath,
+      rootContext: tempDir,
+      options: { development: true, target: 'server' },
+    })
+
+    turbopackLoader.call(ctx as any, source)
+    const result = ctx.getResult()!
+
+    expect(result.err).toBeNull()
+    expect(result.content).toContain(`globalThis.${ZERO_COM_SERVER_REGISTRY}`)
+    expect(result.content).toContain('func(')
+  })
+
   it('should produce a source map when transforming', () => {
     const apiPath = writeFixture('api.ts', `
 import { func } from 'zero-com'

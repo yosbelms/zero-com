@@ -8,6 +8,7 @@ import {
 export interface ZeroComLoaderOptions {
   registry: ServerFuncRegistry
   development: boolean
+  target?: 'client' | 'server'
 }
 
 export default function zeroComLoader(this: LoaderContext<ZeroComLoaderOptions>, source: string): void {
@@ -15,7 +16,8 @@ export default function zeroComLoader(this: LoaderContext<ZeroComLoaderOptions>,
   const filePath = this.resourcePath
 
   const result = transformSourceFile(filePath, source, options.registry, {
-    development: options.development
+    development: options.development,
+    target: options.target
   })
   if (!result.transformed) {
     this.callback(null, source)

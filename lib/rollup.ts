@@ -13,7 +13,7 @@ import {
 } from './common'
 
 export function zeroComRollupPlugin(options: Options = {}): Plugin & { configResolved?: () => void } {
-  const { development = true } = options
+  const { development = true, target } = options
   const compilationId = generateCompilationId()
   const registry: ServerFuncRegistry = new Map()
   let isVite = false
@@ -28,7 +28,11 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
 
     buildStart() {
       buildRegistry(process.cwd(), registry)
-      console.log(`[ZeroComRollupPlugin] Found ${registry.size} files with server functions`)
+      for (const fileRegistry of registry.values()) {
+        for (const info of fileRegistry.values()) {
+          console.log(`[ZeroComRollupPlugin] ${info.funcId}`)
+        }
+      }
     },
 
     // Rollup path: resolveId marks files, load transforms them.
@@ -52,7 +56,7 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
       if (!this.getModuleInfo(id)?.meta?.needsTransform || !fs.existsSync(id)) return null
 
       const content = fs.readFileSync(id, 'utf8')
-      const result = transformSourceFile(id, content, registry, { development })
+      const result = transformSourceFile(id, content, registry, { development, target })
       if (!result.transformed) return null
 
       console.log(`[ZeroComRollupPlugin] Transformed: ${path.relative(process.cwd(), id)}`)
@@ -62,11 +66,17 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
 
     // Vite path: transform hook works reliably (no cross-hook meta needed).
     // Returns transformed TypeScript — Vite's esbuild handles TS→JS.
-    transform(code, id) {
+    transform(code: string, id: string, viteOptions?: unknown) {
       if (!isVite) return null
       if (id.includes('node_modules') || !/\.(ts|tsx|js|jsx|mjs)$/.test(id)) return null
 
-      const result = transformSourceFile(id, code, registry, { development })
+      // Derive effective target: explicit option takes precedence, otherwise infer from Vite's ssr flag
+      const ssr = typeof viteOptions === 'object' && viteOptions !== null && 'ssr' in viteOptions
+        ? (viteOptions as { ssr?: boolean }).ssr
+        : undefined
+      const effectiveTarget = target ?? (ssr === false ? 'client' : ssr === true ? 'server' : undefined)
+
+      const result = transformSourceFile(id, code, registry, { development, target: effectiveTarget })
       if (!result.transformed) return null
 
       console.log(`[ZeroComRollupPlugin] Transformed: ${path.relative(process.cwd(), id)}`)

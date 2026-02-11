@@ -9,6 +9,7 @@ import {
 export interface TurbopackLoaderOptions {
   development?: boolean
   rootDir?: string
+  target?: 'client' | 'server'
 }
 
 // Module-level cache: registry is built once and reused across invocations
@@ -27,10 +28,14 @@ export default function turbopackLoader(this: LoaderContext<TurbopackLoaderOptio
     cachedRegistry = new Map()
     cachedRootDir = rootDir
     buildRegistry(rootDir, cachedRegistry)
-    console.log(`[TurbopackLoader] Found ${cachedRegistry.size} files with server functions`)
+    for (const fileRegistry of cachedRegistry.values()) {
+      for (const info of fileRegistry.values()) {
+        console.log(`[TurbopackLoader] ${info.funcId}`)
+      }
+    }
   }
 
-  const result = transformSourceFile(filePath, source, cachedRegistry, { development })
+  const result = transformSourceFile(filePath, source, cachedRegistry, { development, target: options.target })
 
   if (!result.transformed) {
     this.callback(null, source)

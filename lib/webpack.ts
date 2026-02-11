@@ -25,7 +25,11 @@ export class ZeroComWebpackPlugin {
     // Build registry before compilation
     compiler.hooks.beforeCompile.tap(pluginName, () => {
       buildRegistry(compiler.context, this.registry)
-      console.log(`[ZeroComWebpackPlugin] Found ${this.registry.size} files with server functions`)
+      for (const fileRegistry of this.registry.values()) {
+        for (const info of fileRegistry.values()) {
+          console.log(`[ZeroComWebpackPlugin] ${info.funcId}`)
+        }
+      }
     })
 
     // Add loader rule for TypeScript/JavaScript files
@@ -36,7 +40,7 @@ export class ZeroComWebpackPlugin {
       enforce: 'pre',
       use: [{
         loader: loaderPath,
-        options: { registry: this.registry, development: this.options.development }
+        options: { registry: this.registry, development: this.options.development, target: this.options.target }
       }]
     }
 

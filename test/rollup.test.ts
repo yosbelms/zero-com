@@ -193,6 +193,94 @@ describe('zeroComRollupPlugin', () => {
       expect(result.code).toContain('ZERO_COM_CLIENT_CALL')
     })
 
+    it('should generate client stubs when ssr is false', () => {
+      const apiDir = path.join(tempDir, 'server', 'api')
+      fs.mkdirSync(apiDir, { recursive: true })
+
+      const apiFile = path.join(apiDir, 'users.api.ts')
+      const code = `import { func, context } from 'zero-com';\n\nexport const getUser = func(async (id: string) => {\n  return { id };\n});\n`
+      fs.writeFileSync(apiFile, code)
+
+      process.chdir(tempDir)
+
+      const plugin = zeroComRollupPlugin({ development: true }) as any
+      plugin.configResolved()
+      plugin.buildStart()
+
+      // ssr: false → client stubs
+      const result = plugin.transform(code, apiFile, { ssr: false })
+
+      expect(result).toBeTruthy()
+      expect(result.code).toContain('ZERO_COM_CLIENT_CALL')
+      expect(result.code).not.toContain('ZERO_COM_SERVER_REGISTRY')
+      expect(result.code).not.toContain('import ')
+    })
+
+    it('should keep full bodies and registry when ssr is true', () => {
+      const apiDir = path.join(tempDir, 'server', 'api')
+      fs.mkdirSync(apiDir, { recursive: true })
+
+      const apiFile = path.join(apiDir, 'users.api.ts')
+      const code = `import { func, context } from 'zero-com';\n\nexport const getUser = func(async (id: string) => {\n  return { id };\n});\n`
+      fs.writeFileSync(apiFile, code)
+
+      process.chdir(tempDir)
+
+      const plugin = zeroComRollupPlugin({ development: true }) as any
+      plugin.configResolved()
+      plugin.buildStart()
+
+      // ssr: true → server build, full bodies + registry
+      const result = plugin.transform(code, apiFile, { ssr: true })
+
+      expect(result).toBeTruthy()
+      expect(result.code).toContain('ZERO_COM_SERVER_REGISTRY')
+      expect(result.code).toContain('getUser@server/api/users.api.ts:')
+    })
+
+    it('should let explicit target option override ssr flag', () => {
+      const apiDir = path.join(tempDir, 'server', 'api')
+      fs.mkdirSync(apiDir, { recursive: true })
+
+      const apiFile = path.join(apiDir, 'users.api.ts')
+      const code = `import { func, context } from 'zero-com';\n\nexport const getUser = func(async (id: string) => {\n  return { id };\n});\n`
+      fs.writeFileSync(apiFile, code)
+
+      process.chdir(tempDir)
+
+      // Explicit target: 'client' should override ssr: true
+      const plugin = zeroComRollupPlugin({ development: true, target: 'client' }) as any
+      plugin.configResolved()
+      plugin.buildStart()
+
+      const result = plugin.transform(code, apiFile, { ssr: true })
+
+      expect(result).toBeTruthy()
+      expect(result.code).toContain('ZERO_COM_CLIENT_CALL')
+      expect(result.code).not.toContain('ZERO_COM_SERVER_REGISTRY')
+    })
+
+    it('should be backwards compatible with no target and no ssr flag', () => {
+      const apiDir = path.join(tempDir, 'server', 'api')
+      fs.mkdirSync(apiDir, { recursive: true })
+
+      const apiFile = path.join(apiDir, 'users.api.ts')
+      const code = `import { func, context } from 'zero-com';\n\nexport const getUser = func(async (id: string) => {\n  return { id };\n});\n`
+      fs.writeFileSync(apiFile, code)
+
+      process.chdir(tempDir)
+
+      const plugin = zeroComRollupPlugin({ development: true }) as any
+      plugin.configResolved()
+      plugin.buildStart()
+
+      // No ssr flag → backwards compatible, registry code appended
+      const result = plugin.transform(code, apiFile)
+
+      expect(result).toBeTruthy()
+      expect(result.code).toContain('ZERO_COM_SERVER_REGISTRY')
+    })
+
     it('should skip node_modules and non-script files', () => {
       const plugin = zeroComRollupPlugin() as any
       plugin.configResolved()

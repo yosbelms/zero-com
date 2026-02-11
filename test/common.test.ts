@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { Project, SyntaxKind } from 'ts-morph'
 import ts from 'typescript'
-import { formatFuncIdName, isFromLibrary, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME } from '../lib/common'
+import { formatFuncIdName, isFromLibrary, generateClientStubs, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME, ServerFuncInfo } from '../lib/common'
 
 function createSourceFile(content: string) {
   const project = new Project({
@@ -66,6 +66,32 @@ describe('isFromLibrary', () => {
 
     const callExpr = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)[0]
     expect(isFromLibrary(callExpr, 'zero-com')).toBe(false)
+  })
+})
+
+describe('generateClientStubs', () => {
+  it('should produce stub exports with funcIds and no imports', () => {
+    const fileRegistry = new Map<string, ServerFuncInfo>([
+      ['getUser', { funcId: 'getUser@server/api/users.api.ts:4', filePath: '/abs/server/api/users.api.ts', exportName: 'getUser' }],
+      ['createUser', { funcId: 'createUser@server/api/users.api.ts:8', filePath: '/abs/server/api/users.api.ts', exportName: 'createUser' }],
+    ])
+
+    const result = generateClientStubs(fileRegistry)
+
+    expect(result).toContain(`export const getUser = (...args) => globalThis.${ZERO_COM_CLIENT_CALL}('getUser@server/api/users.api.ts:4', args);`)
+    expect(result).toContain(`export const createUser = (...args) => globalThis.${ZERO_COM_CLIENT_CALL}('createUser@server/api/users.api.ts:8', args);`)
+    expect(result).not.toContain('import ')
+    expect(result).not.toContain(ZERO_COM_SERVER_REGISTRY)
+  })
+
+  it('should handle single function', () => {
+    const fileRegistry = new Map<string, ServerFuncInfo>([
+      ['doSomething', { funcId: 'doSomething@api.ts:1', filePath: '/abs/api.ts', exportName: 'doSomething' }],
+    ])
+
+    const result = generateClientStubs(fileRegistry)
+
+    expect(result).toBe(`export const doSomething = (...args) => globalThis.${ZERO_COM_CLIENT_CALL}('doSomething@api.ts:1', args);`)
   })
 })
 

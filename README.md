@@ -217,6 +217,7 @@ When `getFullName` is called from the client:
 | Option      | Type      | Description                                                                 |
 |-------------|-----------|-----------------------------------------------------------------------------|
 | `development` | `boolean`   | If `false`, will add internal variable renaming to the final bundle.        |
+| `target`    | `'client' \| 'server'` | When `'client'`, server function files are replaced with lightweight RPC stubs containing no server dependencies. When `'server'`, full function bodies and registry code are preserved. When omitted, the Vite/Rollup plugin infers it from the `ssr` flag in the `transform` hook. |
 
 ## Complete Example
 

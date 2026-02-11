@@ -10,6 +10,7 @@ export type Replacement = { start: number; end: number; content: string }
 // Types
 export type Options = {
   development?: boolean
+  target?: 'client' | 'server'
 }
 
 export type ServerFuncInfo = {
@@ -287,11 +288,19 @@ if (!globalThis.${ZERO_COM_SERVER_REGISTRY}) globalThis.${ZERO_COM_SERVER_REGIST
 ${registrations}`
 }
 
+export const generateClientStubs = (fileRegistry: Map<string, ServerFuncInfo>): string => {
+  const stubs = Array.from(fileRegistry.values())
+    .map(info => `export const ${info.exportName} = (...args) => globalThis.${ZERO_COM_CLIENT_CALL}('${info.funcId}', args);`)
+    .join('\n')
+  return stubs
+}
+
 // Main transformation orchestrator
 export type TransformResult = { content: string; transformed: boolean; map?: SourceMap }
 
 export type TransformOptions = {
   development?: boolean
+  target?: 'client' | 'server'
 }
 
 export const transformSourceFile = (
@@ -300,12 +309,17 @@ export const transformSourceFile = (
   registry: ServerFuncRegistry,
   options: TransformOptions = {}
 ): TransformResult => {
-  const { development = true } = options
+  const { development = true, target } = options
   const project = createProject()
   const sourceFile = project.createSourceFile(filePath, content, { overwrite: true })
 
   const fileRegistry = registry.get(filePath)
   const isServerFunctionFile = fileRegistry && fileRegistry.size > 0
+
+  if (target === 'client' && isServerFunctionFile) {
+    return { content: generateClientStubs(fileRegistry), transformed: true }
+  }
+
   const importedFuncs = getImportedServerFunctions(sourceFile, registry)
 
   // Don't transform calls to functions defined in the same file
