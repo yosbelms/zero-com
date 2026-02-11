@@ -9,9 +9,13 @@ declare global {
 function getContextStorage() {
   if (!globalThis.ZERO_COM_CONTEXT_STORAGE) {
     try {
-      // Dynamic import to avoid bundling async_hooks for browser
-      const { AsyncLocalStorage } = require('async_hooks')
-      globalThis.ZERO_COM_CONTEXT_STORAGE = new AsyncLocalStorage()
+      // Dynamic require to avoid bundling async_hooks for browser.
+      // Falls back to process.getBuiltinModule() for ESM contexts (e.g. Vite SSR)
+      // where require() is not available.
+      const mod = typeof require === 'function'
+        ? require('async_hooks')
+        : (process as any).getBuiltinModule('node:async_hooks')
+      globalThis.ZERO_COM_CONTEXT_STORAGE = new mod.AsyncLocalStorage()
     } catch {
       // Browser environment - context storage not available
       globalThis.ZERO_COM_CONTEXT_STORAGE = undefined
