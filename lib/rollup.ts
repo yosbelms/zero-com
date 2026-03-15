@@ -24,7 +24,7 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
   // Cache transform results by filePath → { content, result } to avoid re-running
   // ts-morph on every SSR request in Vite dev mode (ssrLoadModule re-invokes transform
   // for each navigation even when the file hasn't changed).
-  const transformCache = new Map<string, { content: string; result: { content: string; map?: any } | null }>()
+  const transformCache = new Map<string, { content: string; result: { code: string; map?: any } | null }>()
   let isVite = false
   let scanDir = optContextDir ?? process.cwd()
 
