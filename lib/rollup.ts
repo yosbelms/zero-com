@@ -21,10 +21,6 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
   const compilationId = generateCompilationId()
   const registry: ServerFuncRegistry = new Map()
   const project = createProject()
-  // Cache transform results by filePath → { content, result } to avoid re-running
-  // ts-morph on every SSR request in Vite dev mode (ssrLoadModule re-invokes transform
-  // for each navigation even when the file hasn't changed).
-  const transformCache = new Map<string, { content: string; result: { code: string; map?: any } | null }>()
   let isVite = false
   let scanDir = optContextDir ?? process.cwd()
 
@@ -39,7 +35,6 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
     buildStart() {
       if (!optContextDir) scanDir = process.cwd()
       buildRegistry(scanDir, registry, project)
-      transformCache.clear()
       for (const fileRegistry of registry.values()) {
         for (const info of fileRegistry.values()) {
           console.log(`[ZeroComRollupPlugin] ${info.funcId}`)
@@ -50,7 +45,6 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
     watchChange(id: string) {
       if (!FILE_EXTENSIONS.slice(1).includes(path.extname(id))) return
       updateRegistryForFile(id, scanDir, registry, project)
-      transformCache.clear()
     },
 
     // Rollup path: resolveId marks files, load transforms them.
@@ -91,11 +85,6 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
       if (id[0] === '\0' || id.includes('node_modules') || !/\.(ts|tsx|js|jsx|mjs)$/.test(id)) return null
       if (!mightNeedTransform(code, id, registry)) return null
 
-      // Return cached result if content hasn't changed (avoids re-running ts-morph
-      // on every SSR request in Vite dev mode where ssrLoadModule re-invokes transform)
-      const cached = transformCache.get(id)
-      if (cached && cached.content === code) return cached.result
-
       // Derive effective target: explicit option takes precedence, otherwise infer from Vite's ssr flag
       const ssr = typeof viteOptions === 'object' && viteOptions !== null && 'ssr' in viteOptions
         ? (viteOptions as { ssr?: boolean }).ssr
@@ -103,16 +92,10 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
       const effectiveTarget = target ?? (ssr === false ? 'client' : ssr === true ? 'server' : undefined)
 
       const result = transformSourceFile(id, code, registry, { development, target: effectiveTarget }, project)
+      if (!result.transformed) return null
 
-      if (!result.transformed) {
-        transformCache.set(id, { content: code, result: null })
-        return null
-      }
-
-      const out = { code: result.content, map: result.map ?? null }
-      transformCache.set(id, { content: code, result: out })
       console.log(`[ZeroComRollupPlugin] Transformed: ${path.relative(process.cwd(), id)}`)
-      return out
+      return { code: result.content, map: result.map ?? null }
     },
 
     renderChunk(code: string) {
