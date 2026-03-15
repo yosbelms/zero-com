@@ -5,18 +5,24 @@ import {
   Options,
   ServerFuncRegistry,
   buildRegistry,
+  updateRegistryForFile,
   resolveFilePath,
   transformSourceFile,
+  mightNeedTransform,
   emitToJs,
   applyReplacements,
-  generateCompilationId
+  generateCompilationId,
+  createProject,
+  FILE_EXTENSIONS,
 } from './common'
 
 export function zeroComRollupPlugin(options: Options = {}): Plugin & { configResolved?: () => void } {
-  const { development = true, target } = options
+  const { development = true, target, contextDir: optContextDir } = options
   const compilationId = generateCompilationId()
   const registry: ServerFuncRegistry = new Map()
+  const project = createProject()
   let isVite = false
+  let scanDir = optContextDir ?? process.cwd()
 
   return {
     name: 'zero-com-rollup-plugin',
@@ -27,12 +33,18 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
     },
 
     buildStart() {
-      buildRegistry(process.cwd(), registry)
+      if (!optContextDir) scanDir = process.cwd()
+      buildRegistry(scanDir, registry, project)
       for (const fileRegistry of registry.values()) {
         for (const info of fileRegistry.values()) {
           console.log(`[ZeroComRollupPlugin] ${info.funcId}`)
         }
       }
+    },
+
+    watchChange(id: string) {
+      if (!FILE_EXTENSIONS.slice(1).includes(path.extname(id))) return
+      updateRegistryForFile(id, scanDir, registry, project)
     },
 
     // Rollup path: resolveId marks files, load transforms them.
@@ -56,7 +68,9 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
       if (!this.getModuleInfo(id)?.meta?.needsTransform || !fs.existsSync(id)) return null
 
       const content = fs.readFileSync(id, 'utf8')
-      const result = transformSourceFile(id, content, registry, { development, target })
+      if (!mightNeedTransform(content, id, registry)) return null
+
+      const result = transformSourceFile(id, content, registry, { development, target }, project)
       if (!result.transformed) return null
 
       console.log(`[ZeroComRollupPlugin] Transformed: ${path.relative(process.cwd(), id)}`)
@@ -69,6 +83,7 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
     transform(code: string, id: string, viteOptions?: unknown) {
       if (!isVite) return null
       if (id[0] === '\0' || id.includes('node_modules') || !/\.(ts|tsx|js|jsx|mjs)$/.test(id)) return null
+      if (!mightNeedTransform(code, id, registry)) return null
 
       // Derive effective target: explicit option takes precedence, otherwise infer from Vite's ssr flag
       const ssr = typeof viteOptions === 'object' && viteOptions !== null && 'ssr' in viteOptions
@@ -76,7 +91,7 @@ export function zeroComRollupPlugin(options: Options = {}): Plugin & { configRes
         : undefined
       const effectiveTarget = target ?? (ssr === false ? 'client' : ssr === true ? 'server' : undefined)
 
-      const result = transformSourceFile(id, code, registry, { development, target: effectiveTarget })
+      const result = transformSourceFile(id, code, registry, { development, target: effectiveTarget }, project)
       if (!result.transformed) return null
 
       console.log(`[ZeroComRollupPlugin] Transformed: ${path.relative(process.cwd(), id)}`)

@@ -3,15 +3,19 @@ import {
   Options,
   ServerFuncRegistry,
   buildRegistry,
+  updateRegistryForFile,
   applyReplacements,
   generateCompilationId,
+  createProject,
   FILE_EXTENSIONS
 } from './common'
+import { Project } from 'ts-morph'
 
 export class ZeroComWebpackPlugin {
   private options: Options
   private compilationId: string
   private registry: ServerFuncRegistry = new Map()
+  private project: Project = createProject()
 
   constructor(options: Options = {}) {
     this.options = { development: true, ...options }
@@ -21,15 +25,21 @@ export class ZeroComWebpackPlugin {
   apply(compiler: Compiler) {
     const pluginName = ZeroComWebpackPlugin.name
     const { webpack } = compiler
+    const contextDir = this.options.contextDir ?? compiler.context
 
     // Build registry before compilation
     compiler.hooks.beforeCompile.tap(pluginName, () => {
-      buildRegistry(compiler.context, this.registry)
+      buildRegistry(contextDir, this.registry, this.project)
       for (const fileRegistry of this.registry.values()) {
         for (const info of fileRegistry.values()) {
           console.log(`[ZeroComWebpackPlugin] ${info.funcId}`)
         }
       }
+    })
+
+    // Incrementally update registry when a file changes during watch mode
+    compiler.hooks.invalid.tap(pluginName, (fileName) => {
+      if (fileName) updateRegistryForFile(fileName, contextDir, this.registry, this.project)
     })
 
     // Add loader rule for TypeScript/JavaScript files
@@ -40,7 +50,7 @@ export class ZeroComWebpackPlugin {
       enforce: 'pre',
       use: [{
         loader: loaderPath,
-        options: { registry: this.registry, development: this.options.development, target: this.options.target }
+        options: { registry: this.registry, project: this.project, development: this.options.development, target: this.options.target }
       }]
     }
 

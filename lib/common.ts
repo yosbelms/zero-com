@@ -11,6 +11,7 @@ export type Replacement = { start: number; end: number; content: string }
 export type Options = {
   development?: boolean
   target?: 'client' | 'server'
+  contextDir?: string
 }
 
 export type ServerFuncInfo = {
@@ -90,8 +91,27 @@ const getCalleeFullName = (callExpr: CallExpression): string => {
   return ''
 }
 
+// Fast pre-filter: check if a file might need transformation before doing expensive ts-morph parsing
+export const mightNeedTransform = (content: string, filePath: string, registry: ServerFuncRegistry): boolean => {
+  if (content.includes(LIBRARY_NAME)) return true
+  if (registry.has(filePath)) return true
+  if (registry.size === 0) return false
+
+  // Quick import scan: check if any imported path matches a registered server function file
+  const importPattern = /from\s+['"](\.[^'"]+)['"]/g
+  let match
+  while ((match = importPattern.exec(content)) !== null) {
+    const importedSegment = match[1].split('/').pop() ?? ''
+    if (!importedSegment) continue
+    for (const registeredPath of registry.keys()) {
+      if (registeredPath.includes(importedSegment)) return true
+    }
+  }
+  return false
+}
+
 // Registry building
-export const buildRegistry = (contextDir: string, registry: ServerFuncRegistry): void => {
+export const buildRegistry = (contextDir: string, registry: ServerFuncRegistry, project?: Project): void => {
   registry.clear()
   const scanDirectory = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -99,15 +119,28 @@ export const buildRegistry = (contextDir: string, registry: ServerFuncRegistry):
       if (entry.isDirectory() && entry.name !== 'node_modules' && !entry.name.startsWith('.')) {
         scanDirectory(fullPath)
       } else if (entry.isFile() && FILE_EXTENSIONS.slice(1).includes(path.extname(entry.name))) {
-        scanFileForServerFunctions(fullPath, contextDir, registry)
+        scanFileForServerFunctions(fullPath, contextDir, registry, project)
       }
     }
   }
   scanDirectory(contextDir)
 }
 
-const scanFileForServerFunctions = (filePath: string, contextDir: string, registry: ServerFuncRegistry): void => {
-  const sourceFile = createProject().createSourceFile(filePath, fs.readFileSync(filePath, 'utf8'), { overwrite: true })
+export const updateRegistryForFile = (filePath: string, contextDir: string, registry: ServerFuncRegistry, project?: Project): void => {
+  if (!fs.existsSync(filePath)) {
+    registry.delete(filePath)
+    return
+  }
+  const ext = path.extname(filePath)
+  if (!FILE_EXTENSIONS.slice(1).includes(ext)) return
+  scanFileForServerFunctions(filePath, contextDir, registry, project)
+}
+
+const scanFileForServerFunctions = (filePath: string, contextDir: string, registry: ServerFuncRegistry, project?: Project): void => {
+  const content = fs.readFileSync(filePath, 'utf8')
+  if (!content.includes(LIBRARY_NAME)) return
+  const proj = project ?? createProject()
+  const sourceFile = proj.createSourceFile(filePath, content, { overwrite: true })
   const fileRegistry = new Map<string, ServerFuncInfo>()
 
   for (const decl of sourceFile.getVariableDeclarations()) {
@@ -307,11 +340,12 @@ export const transformSourceFile = (
   filePath: string,
   content: string,
   registry: ServerFuncRegistry,
-  options: TransformOptions = {}
+  options: TransformOptions = {},
+  project?: Project
 ): TransformResult => {
   const { development = true, target } = options
-  const project = createProject()
-  const sourceFile = project.createSourceFile(filePath, content, { overwrite: true })
+  const proj = project ?? createProject()
+  const sourceFile = proj.createSourceFile(filePath, content, { overwrite: true })
 
   const fileRegistry = registry.get(filePath)
   const isServerFunctionFile = fileRegistry && fileRegistry.size > 0
@@ -351,7 +385,7 @@ export const transformSourceFile = (
     if (replacements.length > 0) {
       const { code, map } = applyReplacementsWithMap(content, replacements, filePath)
       // Create a new source file from the transformed code to append registry
-      const transformedSourceFile = project.createSourceFile(filePath + '.transformed', code, { overwrite: true })
+      const transformedSourceFile = proj.createSourceFile(filePath + '.transformed', code, { overwrite: true })
       return { content: appendRegistryCode(transformedSourceFile, fileRegistry), transformed: true, map }
     }
 
