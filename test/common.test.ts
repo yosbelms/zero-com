@@ -4,7 +4,7 @@ import ts from 'typescript'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { formatFuncIdName, isFromLibrary, generateClientStubs, mightNeedTransform, updateRegistryForFile, buildRegistry, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME, ServerFuncInfo, ServerFuncRegistry } from '../lib/common'
+import { formatFuncIdName, isFromLibrary, generateClientStubs, mightNeedTransform, updateRegistryForFile, buildRegistry, hasHandleCall, generateRegistryRequires, transformSourceFile, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME, ServerFuncInfo, ServerFuncRegistry } from '../lib/common'
 
 function createSourceFile(content: string) {
   const project = new Project({
@@ -217,6 +217,128 @@ describe('updateRegistryForFile', () => {
     updateRegistryForFile(filePath, tempDir, registry)
     expect(registry.get(filePath)!.size).toBe(2)
     expect(registry.get(filePath)!.has('createUser')).toBe(true)
+  })
+})
+
+describe('hasHandleCall', () => {
+  it('should return true when file imports and calls handle() from zero-com', () => {
+    const sourceFile = createSourceFile(`
+      import { handle } from 'zero-com'
+      export default async function handler(req: any, res: any) {
+        const result = await handle(req.body.funcId, {}, req.body.params)
+        res.json(result)
+      }
+    `)
+    expect(hasHandleCall(sourceFile)).toBe(true)
+  })
+
+  it('should return false when file does not call handle()', () => {
+    const sourceFile = createSourceFile(`
+      import { func } from 'zero-com'
+      export const getUser = func(async (id: string) => ({ id }))
+    `)
+    expect(hasHandleCall(sourceFile)).toBe(false)
+  })
+
+  it('should return false when handle is called from a different library', () => {
+    const sourceFile = createSourceFile(`
+      import { handle } from 'some-other-lib'
+      export default (req: any) => handle(req.id, {}, [])
+    `)
+    expect(hasHandleCall(sourceFile)).toBe(false)
+  })
+})
+
+describe('generateRegistryRequires', () => {
+  it('should emit a require() line for each registered file', () => {
+    const registry: ServerFuncRegistry = new Map([
+      ['/project/client/funcs.ts', new Map()],
+      ['/project/client/auth.ts', new Map()],
+    ])
+    const result = generateRegistryRequires(registry)
+    expect(result).toContain('require("/project/client/funcs.ts")')
+    expect(result).toContain('require("/project/client/auth.ts")')
+  })
+
+  it('should return empty string for an empty registry', () => {
+    const registry: ServerFuncRegistry = new Map()
+    expect(generateRegistryRequires(registry)).toBe('')
+  })
+})
+
+describe('transformSourceFile — server auto-registration', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'zero-com-autoreg-test-')))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it('should prepend require() calls for all registry files when server processes a handle() file', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const handlerSource = `import { handle } from 'zero-com';\nexport default async function handler(req: any, res: any) { const result = await handle(req.body.funcId, {}, req.body.params); res.json(result); }\n`
+    const handlerPath = path.join(tempDir, 'handler.ts')
+
+    const result = transformSourceFile(handlerPath, handlerSource, registry, { target: 'server', development: true })
+
+    expect(result.transformed).toBe(true)
+    expect(result.content).toContain(`require(${JSON.stringify(funcsPath)})`)
+  })
+
+  it('should not inject requires when target is client', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const handlerSource = `import { handle } from 'zero-com';\nexport default async function handler(req: any, res: any) { const result = await handle(req.body.funcId, {}, req.body.params); res.json(result); }\n`
+    const handlerPath = path.join(tempDir, 'handler.ts')
+
+    const result = transformSourceFile(handlerPath, handlerSource, registry, { target: 'client', development: true })
+
+    expect(result.content).not.toContain('require(')
+  })
+
+  it('should not inject requires when file has no handle() call', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const otherSource = `import { func } from 'zero-com';\nexport const doSomething = func(async () => 'ok');\n`
+    const otherPath = path.join(tempDir, 'other.ts')
+
+    const result = transformSourceFile(otherPath, otherSource, registry, { target: 'server', development: true })
+
+    expect(result.content).not.toContain('require(')
+  })
+
+  it('should still inject requires alongside production-mode handle() replacement', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const handlerSource = `import { handle } from 'zero-com';\nexport default async function handler(req: any, res: any) { const result = await handle(req.body.funcId, {}, req.body.params); res.json(result); }\n`
+    const handlerPath = path.join(tempDir, 'handler.ts')
+
+    const result = transformSourceFile(handlerPath, handlerSource, registry, { target: 'server', development: false })
+
+    expect(result.transformed).toBe(true)
+    expect(result.content).toContain(`require(${JSON.stringify(funcsPath)})`)
+    // Production mode also replaces handle() call
+    expect(result.content).toContain(ZERO_COM_SERVER_REGISTRY)
   })
 })
 

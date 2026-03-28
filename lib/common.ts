@@ -217,6 +217,25 @@ export const collectCallSiteReplacements = (sourceFile: SourceFile, importedFunc
   return replacements
 }
 
+export const hasHandleCall = (sourceFile: SourceFile): boolean => {
+  let found = false
+  sourceFile.forEachDescendant((node) => {
+    if (found) return
+    if (node.getKind() !== SyntaxKind.CallExpression) return
+    const callExpr = node as CallExpression
+    if (isFromLibrary(callExpr, LIBRARY_NAME) && getCalleeName(callExpr) === HANDLE_NAME) {
+      found = true
+    }
+  })
+  return found
+}
+
+export const generateRegistryRequires = (registry: ServerFuncRegistry): string => {
+  return Array.from(registry.keys())
+    .map(fp => `require(${JSON.stringify(fp)});`)
+    .join('\n')
+}
+
 export const collectHandleCallReplacements = (sourceFile: SourceFile): Replacement[] => {
   const replacements: Replacement[] = []
 
@@ -392,9 +411,16 @@ export const transformSourceFile = (
     return { content: appendRegistryCode(sourceFile, fileRegistry), transformed: true }
   }
 
+  const isHandleFile = target === 'server' && hasHandleCall(sourceFile)
+
   if (replacements.length > 0) {
     const { code, map } = applyReplacementsWithMap(content, replacements, filePath)
-    return { content: code, transformed: true, map }
+    const finalContent = isHandleFile ? generateRegistryRequires(registry) + '\n' + code : code
+    return { content: finalContent, transformed: true, map }
+  }
+
+  if (isHandleFile) {
+    return { content: generateRegistryRequires(registry) + '\n' + content, transformed: true }
   }
 
   return { content, transformed: false }
