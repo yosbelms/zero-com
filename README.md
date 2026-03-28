@@ -212,6 +212,37 @@ When `getFullName` is called from the client:
 4. `getFirstName` executes directly (no transport) with the same context
 5. Both functions can access `context()` with the same data
 
+## File boundary rule
+
+Any file that contains `func()` exports is treated as a **server-only module**. On the client build the plugin replaces the **entire file** with lightweight RPC stubs — only the `func()` exports survive, everything else in that file is discarded.
+
+This means you must not mix `func()` declarations with client-side code (state, UI utilities, etc.) in the same file. The pattern is the same as Next.js `"use server"` files: one side of the boundary per file.
+
+**Wrong** — `connect` will be `undefined` on the client because the whole file is replaced:
+
+```ts
+// store.ts  ❌
+import { func } from 'zero-com'
+import { createStore } from './create-store'
+
+export const { connect, useStore } = createStore(...)  // lost on client
+
+export const getPhones = func(async () => { ... })
+```
+
+**Right** — separate the RPC calls from client state:
+
+```ts
+// funcs.ts  ✅  (replaced with stubs on client)
+import { func } from 'zero-com'
+export const getPhones = func(async () => { ... })
+
+// store.ts  ✅  (untouched on client)
+import { createStore } from './create-store'
+export const { connect, useStore } = createStore(...)
+export * from './funcs'
+```
+
 ## Plugin options
 
 | Option      | Type      | Description                                                                 |
@@ -301,7 +332,8 @@ export const getPhones = func(async (name: string) => {
 // server.ts
 import express from 'express';
 import { handle } from 'zero-com';
-import './src/server/api/phones.js'; // Make sure to import the server-side modules
+// No manual imports needed — the plugin automatically registers all func() files
+// when it transforms any file that calls handle()
 
 const app = express();
 app.use(express.json());
