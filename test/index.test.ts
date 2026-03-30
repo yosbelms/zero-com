@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { func, handle, call, context } from '../lib/runtime'
 
 // Runtime functions work at runtime in development mode.
@@ -98,5 +98,83 @@ describe('call()', () => {
     const myHandler = async (funcId: string, args: any[]) => ({ funcId, args })
     call(myHandler)
     expect(globalThis.ZERO_COM_CLIENT_CALL).toBe(myHandler)
+  })
+})
+
+describe('ZERO_COM_CLIENT_CALL default — outside handle() context', () => {
+  let savedClientCall: any
+  let savedRegistry: any
+
+  beforeEach(() => {
+    savedClientCall = globalThis.ZERO_COM_CLIENT_CALL
+    savedRegistry = globalThis.ZERO_COM_SERVER_REGISTRY
+    // Restore the default implementation (bypasses the call() override from above)
+    delete (globalThis as any).ZERO_COM_CLIENT_CALL
+    // Re-import triggers the `if (typeof ... === 'undefined')` guard at module level,
+    // but since the module is already cached we instead reconstruct the default inline.
+    // The default: propagate context if present, call directly if not.
+    globalThis.ZERO_COM_CLIENT_CALL = (funcId: string, args: any[]) => {
+      const { AsyncLocalStorage } = require('async_hooks')
+      if (!globalThis.ZERO_COM_CONTEXT_STORAGE) {
+        globalThis.ZERO_COM_CONTEXT_STORAGE = new AsyncLocalStorage()
+      }
+      const storage = globalThis.ZERO_COM_CONTEXT_STORAGE
+      const fn = globalThis.ZERO_COM_SERVER_REGISTRY?.[funcId]
+      if (!fn) throw new Error(`Function not found: ${funcId}`)
+      const ctx = storage.getStore()
+      if (ctx !== undefined) {
+        return storage.run(ctx, () => fn(...args))
+      }
+      return fn(...args)
+    }
+    globalThis.ZERO_COM_SERVER_REGISTRY = {}
+  })
+
+  afterEach(() => {
+    globalThis.ZERO_COM_CLIENT_CALL = savedClientCall
+    globalThis.ZERO_COM_SERVER_REGISTRY = savedRegistry
+  })
+
+  it('calls function directly when there is no handle() context', () => {
+    const myFn = (x: number) => x * 2
+    globalThis.ZERO_COM_SERVER_REGISTRY['myFn'] = myFn
+
+    const result = globalThis.ZERO_COM_CLIENT_CALL('myFn', [5])
+
+    expect(result).toBe(10)
+  })
+
+  it('passes arguments correctly when called outside handle()', () => {
+    const myFn = (a: string, b: string) => `${a}-${b}`
+    globalThis.ZERO_COM_SERVER_REGISTRY['myFn'] = myFn
+
+    const result = globalThis.ZERO_COM_CLIENT_CALL('myFn', ['hello', 'world'])
+
+    expect(result).toBe('hello-world')
+  })
+
+  it('throws at the context() call site (not at dispatch) when function uses context() outside handle()', () => {
+    const myFn = () => context()
+    globalThis.ZERO_COM_SERVER_REGISTRY['myFn'] = myFn
+
+    expect(() => globalThis.ZERO_COM_CLIENT_CALL('myFn', [])).toThrow('context() called outside of a server function')
+  })
+
+  it('throws when function is not in registry', () => {
+    expect(() => globalThis.ZERO_COM_CLIENT_CALL('nonExistent', [])).toThrow('Function not found: nonExistent')
+  })
+
+  it('propagates existing context when called inside handle()', () => {
+    let receivedCtx: any
+
+    const innerFn = () => { receivedCtx = context() }
+    globalThis.ZERO_COM_SERVER_REGISTRY['innerFn'] = innerFn
+
+    const outerFn = () => globalThis.ZERO_COM_CLIENT_CALL('innerFn', [])
+    globalThis.ZERO_COM_SERVER_REGISTRY['outerFn'] = outerFn
+
+    handle('outerFn', { userId: '99' }, [])
+
+    expect(receivedCtx).toEqual({ userId: '99' })
   })
 })

@@ -212,6 +212,25 @@ When `getFullName` is called from the client:
 4. `getFirstName` executes directly (no transport) with the same context
 5. Both functions can access `context()` with the same data
 
+## Calling server functions outside handle()
+
+Server functions can be called from any server-side code, not only through the RPC path. This is useful for server-side-only integrations like authentication callbacks, cron jobs, or webhook handlers.
+
+```typescript
+// pages/api/auth/[...nextauth].ts  (Next.js example)
+import { getUserByCredentials } from '../../../server/auth/funcs'
+
+const user = await getUserByCredentials(email, password)
+```
+
+When called outside `handle()`, the function executes directly with no context. If the function calls `context()` internally, it throws:
+
+```
+Error: context() called outside of a server function
+```
+
+When called inside `handle()`, context is propagated automatically to the function and any nested `func()` calls, same as the normal RPC path.
+
 ## File boundary rule
 
 Any file that contains `func()` exports is treated as a **server-only module**. On the client build the plugin replaces the **entire file** with lightweight RPC stubs — only the `func()` exports survive, everything else in that file is discarded.

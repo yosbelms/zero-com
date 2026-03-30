@@ -38,19 +38,23 @@ export function context<T = unknown>(): T {
 }
 
 // Default server-side implementation: call directly from registry
-// This enables server functions to call other server functions without transport
+// This enables server functions to call other server functions without transport.
+// If a request context exists (set by handle()), it is propagated automatically.
+// If there is no context (e.g. called from NextAuth or other server-only code that
+// does not go through handle()), the function is called directly — context() will
+// throw inside the function only if the function actually tries to use it.
 if (typeof globalThis.ZERO_COM_CLIENT_CALL === 'undefined') {
   globalThis.ZERO_COM_CLIENT_CALL = (funcId: string, args: any[]) => {
     const storage = getContextStorage()
     if (!storage) {
       throw new Error('Server function called on client without transport configured. Call call() first.')
     }
-    const ctx = storage.getStore()
-    if (ctx === undefined) {
-      throw new Error('Server function called outside of request context')
-    }
     const fn = globalThis.ZERO_COM_SERVER_REGISTRY?.[funcId]
     if (!fn) throw new Error(`Function not found: ${funcId}`)
+    const ctx = storage.getStore()
+    if (ctx !== undefined) {
+      return storage.run(ctx, () => fn(...args))
+    }
     return fn(...args)
   }
 }
