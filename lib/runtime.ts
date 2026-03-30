@@ -83,6 +83,14 @@ export const handle = (
   return storage.run(ctx, () => fn(...args))
 }
 
+// Run a callback within a context, making context() available inside it.
+// Use this in server-only code that does not go through handle() (e.g. auth callbacks).
+export const runWithContext = <T>(ctx: any, fn: () => T): T => {
+  const storage = getContextStorage()
+  if (!storage) throw new Error('runWithContext() is only available on the server')
+  return storage.run(ctx, fn)
+}
+
 // Client calls this to set up transport (overrides default server-side behavior)
 // In production mode: transformed by plugin to assignment
 export const call = (

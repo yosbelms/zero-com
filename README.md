@@ -229,6 +229,21 @@ When called outside `handle()`, the function executes directly with no context. 
 Error: context() called outside of a server function
 ```
 
+Use `runWithContext` to provide a context in those cases:
+
+```typescript
+import { runWithContext } from 'zero-com'
+
+const authorize = async (credentials) => {
+  return runWithContext({}, async () => {
+    const user = await getUserByCredentials(credentials.email, credentials.password)
+    return user ?? null
+  })
+}
+```
+
+`runWithContext` accepts any object as the context value, which will be returned by `context()` inside any server function called within the callback.
+
 When called inside `handle()`, context is propagated automatically to the function and any nested `func()` calls, same as the normal RPC path.
 
 ## File boundary rule
