@@ -1,40 +1,8 @@
+import { asyncLocalStorage as storage } from './async-local-storage'
+
 declare global {
   var ZERO_COM_SERVER_REGISTRY: { [funcId: string]: (...args: any[]) => any }
   var ZERO_COM_CLIENT_CALL: (funcId: string, args: any[]) => any
-  var ZERO_COM_CONTEXT_STORAGE: { run: <T>(ctx: any, fn: () => T) => T; getStore: () => any } | undefined
-}
-
-// Context storage - only available on server (Node.js)
-// Lazily initialized to avoid importing async_hooks on client
-function getContextStorage() {
-  if (!globalThis.ZERO_COM_CONTEXT_STORAGE) {
-    try {
-      // Dynamic require to avoid bundling async_hooks for browser.
-      // Falls back to process.getBuiltinModule() for ESM contexts (e.g. Vite SSR)
-      // where require() is not available.
-      const mod = typeof require === 'function'
-        ? require('async_hooks')
-        : (process as any).getBuiltinModule('node:async_hooks')
-      globalThis.ZERO_COM_CONTEXT_STORAGE = new mod.AsyncLocalStorage()
-    } catch {
-      // Browser environment - context storage not available
-      globalThis.ZERO_COM_CONTEXT_STORAGE = undefined
-    }
-  }
-  return globalThis.ZERO_COM_CONTEXT_STORAGE
-}
-
-// Get the current context - call this inside server functions
-export function context<T = unknown>(): T {
-  const storage = getContextStorage()
-  if (!storage) {
-    throw new Error('context() is only available on the server')
-  }
-  const ctx = storage.getStore()
-  if (ctx === undefined) {
-    throw new Error('context() called outside of a server function')
-  }
-  return ctx
 }
 
 // Default server-side implementation: call directly from registry
@@ -45,7 +13,6 @@ export function context<T = unknown>(): T {
 // throw inside the function only if the function actually tries to use it.
 if (typeof globalThis.ZERO_COM_CLIENT_CALL === 'undefined') {
   globalThis.ZERO_COM_CLIENT_CALL = (funcId: string, args: any[]) => {
-    const storage = getContextStorage()
     if (!storage) {
       throw new Error('Server function called on client without transport configured. Call call() first.')
     }
@@ -57,6 +24,18 @@ if (typeof globalThis.ZERO_COM_CLIENT_CALL === 'undefined') {
     }
     return fn(...args)
   }
+}
+
+// Get the current context - call this inside server functions
+export function context<T = unknown>(): T {
+  if (!storage) {
+    throw new Error('context() is only available on the server')
+  }
+  const ctx = storage.getStore()
+  if (ctx === undefined) {
+    throw new Error('context() called outside of a server function')
+  }
+  return ctx
 }
 
 // func() just returns the function as-is
@@ -76,7 +55,6 @@ export const handle = (
   if (!fn) {
     throw new Error(`Function not found in registry: ${funcId}`)
   }
-  const storage = getContextStorage()
   if (!storage) {
     throw new Error('handle() is only available on the server')
   }
@@ -86,7 +64,6 @@ export const handle = (
 // Run a callback within a context, making context() available inside it.
 // Use this in server-only code that does not go through handle() (e.g. auth callbacks).
 export const runWithContext = <T>(ctx: any, fn: () => T): T => {
-  const storage = getContextStorage()
   if (!storage) throw new Error('runWithContext() is only available on the server')
   return storage.run(ctx, fn)
 }
