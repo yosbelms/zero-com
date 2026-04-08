@@ -4,7 +4,7 @@ import ts from 'typescript'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { formatFuncIdName, isFromLibrary, generateClientStubs, mightNeedTransform, updateRegistryForFile, buildRegistry, hasHandleCall, generateRegistryRequires, transformSourceFile, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, SERVER_FUNCTION_WRAPPER_NAME, ServerFuncInfo, ServerFuncRegistry } from '../lib/common'
+import { formatFuncIdName, isFromLibrary, generateClientStubs, mightNeedTransform, updateRegistryForFile, buildRegistry, hasHandleCall, generateRegistryRequires, transformSourceFile, ZERO_COM_CLIENT_CALL, ZERO_COM_SERVER_REGISTRY, ZERO_COM_CONTEXT_STORAGE, SERVER_FUNCTION_WRAPPER_NAME, ServerFuncInfo, ServerFuncRegistry } from '../lib/common'
 
 function createSourceFile(content: string) {
   const project = new Project({
@@ -339,6 +339,41 @@ describe('transformSourceFile — server auto-registration', () => {
     expect(result.content).toContain(`require(${JSON.stringify(funcsPath)})`)
     // Production mode also replaces handle() call
     expect(result.content).toContain(ZERO_COM_SERVER_REGISTRY)
+  })
+
+  it('should replace handle() with ZERO_COM_CONTEXT_STORAGE.run() in production mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const handlerSource = `import { handle } from 'zero-com';\nexport default async function handler(req: any, res: any) { const result = await handle(req.body.funcId, {}, req.body.params); res.json(result); }\n`
+    const handlerPath = path.join(tempDir, 'handler.ts')
+
+    const result = transformSourceFile(handlerPath, handlerSource, registry, { target: 'server', development: false })
+
+    expect(result.transformed).toBe(true)
+    expect(result.content).toContain(`globalThis.${ZERO_COM_CONTEXT_STORAGE}.run`)
+    expect(result.content).toContain(`globalThis.${ZERO_COM_SERVER_REGISTRY}[req.body.funcId](...req.body.params)`)
+  })
+
+  it('should NOT replace handle() in development mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const handlerSource = `import { handle } from 'zero-com';\nexport default async function handler(req: any, res: any) { const result = await handle(req.body.funcId, {}, req.body.params); res.json(result); }\n`
+    const handlerPath = path.join(tempDir, 'handler.ts')
+
+    const result = transformSourceFile(handlerPath, handlerSource, registry, { target: 'server', development: true })
+
+    expect(result.transformed).toBe(true)
+    expect(result.content).not.toContain(`globalThis.${ZERO_COM_CONTEXT_STORAGE}.run`)
+    // handle() call should remain as-is
+    expect(result.content).toContain('handle(req.body.funcId, {}, req.body.params)')
   })
 })
 

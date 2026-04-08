@@ -3,6 +3,15 @@ import { asyncLocalStorage as storage } from './async-local-storage'
 declare global {
   var ZERO_COM_SERVER_REGISTRY: { [funcId: string]: (...args: any[]) => any }
   var ZERO_COM_CLIENT_CALL: (funcId: string, args: any[]) => any
+  var ZERO_COM_CONTEXT_STORAGE: typeof storage
+}
+
+// Initialize context storage on globalThis — the single source of truth.
+// All functions (context, handle, runWithContext, ZERO_COM_CLIENT_CALL) use this
+// global instance so that context propagates correctly even when the module is
+// loaded multiple times (e.g. webpack-bundled AND externalized).
+if (!globalThis.ZERO_COM_CONTEXT_STORAGE && storage) {
+  globalThis.ZERO_COM_CONTEXT_STORAGE = storage
 }
 
 // Default server-side implementation: call directly from registry
@@ -13,14 +22,15 @@ declare global {
 // throw inside the function only if the function actually tries to use it.
 if (typeof globalThis.ZERO_COM_CLIENT_CALL === 'undefined') {
   globalThis.ZERO_COM_CLIENT_CALL = (funcId: string, args: any[]) => {
-    if (!storage) {
+    const als = globalThis.ZERO_COM_CONTEXT_STORAGE
+    if (!als) {
       throw new Error('Server function called on client without transport configured. Call call() first.')
     }
     const fn = globalThis.ZERO_COM_SERVER_REGISTRY?.[funcId]
     if (!fn) throw new Error(`Function not found: ${funcId}`)
-    const ctx = storage.getStore()
+    const ctx = als.getStore()
     if (ctx !== undefined) {
-      return storage.run(ctx, () => fn(...args))
+      return als.run(ctx, () => fn(...args))
     }
     return fn(...args)
   }
@@ -28,10 +38,11 @@ if (typeof globalThis.ZERO_COM_CLIENT_CALL === 'undefined') {
 
 // Get the current context - call this inside server functions
 export function context<T = unknown>(): T {
-  if (!storage) {
+  const als = globalThis.ZERO_COM_CONTEXT_STORAGE
+  if (!als) {
     throw new Error('context() is only available on the server')
   }
-  const ctx = storage.getStore()
+  const ctx = als.getStore()
   if (ctx === undefined) {
     throw new Error('context() called outside of a server function')
   }
@@ -55,17 +66,19 @@ export const handle = (
   if (!fn) {
     throw new Error(`Function not found in registry: ${funcId}`)
   }
-  if (!storage) {
+  const als = globalThis.ZERO_COM_CONTEXT_STORAGE
+  if (!als) {
     throw new Error('handle() is only available on the server')
   }
-  return storage.run(ctx, () => fn(...args))
+  return als.run(ctx, () => fn(...args))
 }
 
 // Run a callback within a context, making context() available inside it.
 // Use this in server-only code that does not go through handle() (e.g. auth callbacks).
 export const runWithContext = <T>(ctx: any, fn: () => T): T => {
-  if (!storage) throw new Error('runWithContext() is only available on the server')
-  return storage.run(ctx, fn)
+  const als = globalThis.ZERO_COM_CONTEXT_STORAGE
+  if (!als) throw new Error('runWithContext() is only available on the server')
+  return als.run(ctx, fn)
 }
 
 // Client calls this to set up transport (overrides default server-side behavior)

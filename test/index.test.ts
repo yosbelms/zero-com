@@ -101,6 +101,69 @@ describe('call()', () => {
   })
 })
 
+describe('ZERO_COM_CONTEXT_STORAGE', () => {
+  let savedClientCall: any
+  let savedRegistry: any
+
+  beforeEach(() => {
+    savedClientCall = globalThis.ZERO_COM_CLIENT_CALL
+    savedRegistry = globalThis.ZERO_COM_SERVER_REGISTRY
+    // Reconstruct the default ZERO_COM_CLIENT_CALL using the same storage
+    // as ZERO_COM_CONTEXT_STORAGE (mirrors runtime.ts default behavior)
+    const storage = globalThis.ZERO_COM_CONTEXT_STORAGE!
+    globalThis.ZERO_COM_CLIENT_CALL = (funcId: string, args: any[]) => {
+      const fn = globalThis.ZERO_COM_SERVER_REGISTRY?.[funcId]
+      if (!fn) throw new Error(`Function not found: ${funcId}`)
+      const ctx = storage.getStore()
+      if (ctx !== undefined) {
+        return storage.run(ctx, () => fn(...args))
+      }
+      return fn(...args)
+    }
+    globalThis.ZERO_COM_SERVER_REGISTRY = {}
+  })
+
+  afterEach(() => {
+    globalThis.ZERO_COM_CLIENT_CALL = savedClientCall
+    globalThis.ZERO_COM_SERVER_REGISTRY = savedRegistry
+  })
+
+  it('should be initialized on globalThis with AsyncLocalStorage', () => {
+    expect(globalThis.ZERO_COM_CONTEXT_STORAGE).toBeDefined()
+    expect(typeof globalThis.ZERO_COM_CONTEXT_STORAGE!.run).toBe('function')
+    expect(typeof globalThis.ZERO_COM_CONTEXT_STORAGE!.getStore).toBe('function')
+  })
+
+  it('should work as a drop-in for handle() — production-mode transform path', () => {
+    const myFn = (x: number) => x * context<{ multiplier: number }>().multiplier * x
+    globalThis.ZERO_COM_SERVER_REGISTRY = { testFn: myFn }
+
+    const ctx = { multiplier: 3 }
+    // This simulates what the production transform emits:
+    // globalThis.ZERO_COM_CONTEXT_STORAGE.run(ctx, () => globalThis.ZERO_COM_SERVER_REGISTRY[funcId](...args))
+    const result = globalThis.ZERO_COM_CONTEXT_STORAGE!.run(ctx, () =>
+      globalThis.ZERO_COM_SERVER_REGISTRY['testFn'](5)
+    )
+
+    expect(result).toBe(75) // 5 * 3 * 5
+  })
+
+  it('should propagate context through nested calls in production-mode path', () => {
+    let innerCtx: any
+    const innerFn = () => { innerCtx = context() }
+    const outerFn = () => globalThis.ZERO_COM_CLIENT_CALL('innerFn', [])
+
+    globalThis.ZERO_COM_SERVER_REGISTRY = { innerFn, outerFn }
+
+    const ctx = { userId: '42' }
+    globalThis.ZERO_COM_CONTEXT_STORAGE!.run(ctx, () =>
+      globalThis.ZERO_COM_SERVER_REGISTRY['outerFn']()
+    )
+
+    expect(innerCtx).toEqual({ userId: '42' })
+  })
+})
+
 describe('ZERO_COM_CLIENT_CALL default — outside handle() context', () => {
   let savedClientCall: any
   let savedRegistry: any
