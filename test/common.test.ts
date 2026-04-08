@@ -260,9 +260,12 @@ describe('generateRegistryRequires', () => {
     expect(result).toContain('require("/project/client/auth.ts")')
   })
 
-  it('should return empty string for an empty registry', () => {
+  it('should still emit context storage init for an empty registry', () => {
     const registry: ServerFuncRegistry = new Map()
-    expect(generateRegistryRequires(registry)).toBe('')
+    const result = generateRegistryRequires(registry)
+    expect(result).toContain(ZERO_COM_CONTEXT_STORAGE)
+    expect(result).toContain('AsyncLocalStorage')
+    expect(result).not.toContain('require(\"/')
   })
 })
 
@@ -374,6 +377,89 @@ describe('transformSourceFile — server auto-registration', () => {
     expect(result.content).not.toContain(`globalThis.${ZERO_COM_CONTEXT_STORAGE}.run`)
     // handle() call should remain as-is
     expect(result.content).toContain('handle(req.body.funcId, {}, req.body.params)')
+  })
+
+  it('should replace context() with ZERO_COM_CONTEXT_STORAGE.getStore() in production mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const serviceSource = `import { context } from 'zero-com';\nexport const userService = { find() { const ctx = context(); return ctx.userId; } };\n`
+    const servicePath = path.join(tempDir, 'service.ts')
+
+    const result = transformSourceFile(servicePath, serviceSource, registry, { target: 'server', development: false })
+
+    expect(result.transformed).toBe(true)
+    expect(result.content).toContain(`globalThis.${ZERO_COM_CONTEXT_STORAGE}.getStore()`)
+    expect(result.content).not.toContain('context()')
+  })
+
+  it('should NOT replace context() in development mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const serviceSource = `import { context } from 'zero-com';\nexport const userService = { find() { const ctx = context(); return ctx.userId; } };\n`
+    const servicePath = path.join(tempDir, 'service.ts')
+
+    const result = transformSourceFile(servicePath, serviceSource, registry, { target: 'server', development: true })
+
+    expect(result.transformed).toBe(false)
+    expect(result.content).toContain('context()')
+    expect(result.content).not.toContain(`globalThis.${ZERO_COM_CONTEXT_STORAGE}.getStore()`)
+  })
+
+  it('should replace context() with generic type parameter in production mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const serviceSource = `import { context } from 'zero-com';\ntype Ctx = { userId: number };\nexport const userService = { find() { const ctx = context<Ctx>(); return ctx.userId; } };\n`
+    const servicePath = path.join(tempDir, 'service.ts')
+
+    const result = transformSourceFile(servicePath, serviceSource, registry, { target: 'server', development: false })
+
+    expect(result.transformed).toBe(true)
+    expect(result.content).toContain(`globalThis.${ZERO_COM_CONTEXT_STORAGE}.getStore()`)
+  })
+
+  it('should replace runWithContext() with ZERO_COM_CONTEXT_STORAGE.run() in production mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const runnerSource = `import { runWithContext } from 'zero-com';\nexport async function run() { const ctx = { userId: 1 }; return runWithContext(ctx, async () => 'done'); }\n`
+    const runnerPath = path.join(tempDir, 'runner.ts')
+
+    const result = transformSourceFile(runnerPath, runnerSource, registry, { target: 'server', development: false })
+
+    expect(result.transformed).toBe(true)
+    expect(result.content).toContain(`globalThis.${ZERO_COM_CONTEXT_STORAGE}.run(ctx, async () => 'done')`)
+    expect(result.content).not.toContain('runWithContext(')
+  })
+
+  it('should NOT replace runWithContext() in development mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const runnerSource = `import { runWithContext } from 'zero-com';\nexport async function run() { const ctx = { userId: 1 }; return runWithContext(ctx, async () => 'done'); }\n`
+    const runnerPath = path.join(tempDir, 'runner.ts')
+
+    const result = transformSourceFile(runnerPath, runnerSource, registry, { target: 'server', development: true })
+
+    expect(result.transformed).toBe(false)
+    expect(result.content).toContain('runWithContext(ctx, async () => \'done\')')
   })
 })
 

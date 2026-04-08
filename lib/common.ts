@@ -29,6 +29,8 @@ export const ZERO_COM_CONTEXT_STORAGE = 'ZERO_COM_CONTEXT_STORAGE'
 export const SERVER_FUNCTION_WRAPPER_NAME = 'func'
 export const HANDLE_NAME = 'handle'
 export const CALL_NAME = 'call'
+export const CONTEXT_NAME = 'context'
+export const RUN_WITH_CONTEXT_NAME = 'runWithContext'
 export const LIBRARY_NAME = 'zero-com'
 export const FILE_EXTENSIONS = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs']
 
@@ -231,9 +233,17 @@ export const hasHandleCall = (sourceFile: SourceFile): boolean => {
 }
 
 export const generateRegistryRequires = (registry: ServerFuncRegistry): string => {
-  return Array.from(registry.keys())
+  const requires = Array.from(registry.keys())
     .map(fp => `require(${JSON.stringify(fp)});`)
     .join('\n')
+
+  // Initialize ZERO_COM_CONTEXT_STORAGE inline so it lives inside the bundle
+  // and gets mangled together with all references. Without this, the runtime
+  // module may be externalized (loaded via Node.js require) and set the
+  // un-mangled name while the bundle references the mangled name.
+  const initContextStorage = `if (!globalThis.${ZERO_COM_CONTEXT_STORAGE}) { globalThis.${ZERO_COM_CONTEXT_STORAGE} = new (require('async_hooks').AsyncLocalStorage)(); }`
+
+  return initContextStorage + '\n' + requires
 }
 
 export const collectHandleCallReplacements = (sourceFile: SourceFile): Replacement[] => {
@@ -255,6 +265,47 @@ export const collectHandleCallReplacements = (sourceFile: SourceFile): Replaceme
       start: callExpr.getStart(),
       end: callExpr.getEnd(),
       content: `globalThis.${ZERO_COM_CONTEXT_STORAGE}.run(${ctx}, () => globalThis.${ZERO_COM_SERVER_REGISTRY}[${funcId}](...${argsArray}))`
+    })
+  })
+
+  return replacements
+}
+
+export const collectContextCallReplacements = (sourceFile: SourceFile): Replacement[] => {
+  const replacements: Replacement[] = []
+
+  sourceFile.forEachDescendant((node) => {
+    if (node.getKind() !== SyntaxKind.CallExpression) return
+    const callExpr = node as CallExpression
+    if (!isFromLibrary(callExpr, LIBRARY_NAME) || getCalleeName(callExpr) !== CONTEXT_NAME) return
+
+    replacements.push({
+      start: callExpr.getStart(),
+      end: callExpr.getEnd(),
+      content: `globalThis.${ZERO_COM_CONTEXT_STORAGE}.getStore()`
+    })
+  })
+
+  return replacements
+}
+
+export const collectRunWithContextCallReplacements = (sourceFile: SourceFile): Replacement[] => {
+  const replacements: Replacement[] = []
+
+  sourceFile.forEachDescendant((node) => {
+    if (node.getKind() !== SyntaxKind.CallExpression) return
+    const callExpr = node as CallExpression
+    if (!isFromLibrary(callExpr, LIBRARY_NAME) || getCalleeName(callExpr) !== RUN_WITH_CONTEXT_NAME) return
+
+    const args = callExpr.getArguments()
+    if (args.length < 2) return
+
+    const ctx = args[0].getText()
+    const fn = args[1].getText()
+    replacements.push({
+      start: callExpr.getStart(),
+      end: callExpr.getEnd(),
+      content: `globalThis.${ZERO_COM_CONTEXT_STORAGE}.run(${ctx}, ${fn})`
     })
   })
 
@@ -391,6 +442,8 @@ export const transformSourceFile = (
   if (!development) {
     replacements.push(...collectHandleCallReplacements(sourceFile))
     replacements.push(...collectSendCallReplacements(sourceFile))
+    replacements.push(...collectContextCallReplacements(sourceFile))
+    replacements.push(...collectRunWithContextCallReplacements(sourceFile))
   }
 
   // Handle server function files

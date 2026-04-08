@@ -1,6 +1,6 @@
 {
   "name": "zero-com",
-  "version": "1.14.0",
+  "version": "1.14.2",
   "main": "index.js",
   "browser": {
     "./lib/async-local-storage.js": "./lib/async-local-storage.browser.js"
