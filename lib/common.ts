@@ -232,18 +232,20 @@ export const hasHandleCall = (sourceFile: SourceFile): boolean => {
   return found
 }
 
+// Initialize ZERO_COM_CONTEXT_STORAGE inline so it lives inside the bundle
+// and gets mangled together with all references. Without this, the runtime
+// module may be externalized (loaded via Node.js require) and set the
+// un-mangled name while the bundle references the mangled name.
+export const generateContextStorageInit = (): string => {
+  return `if (!globalThis.${ZERO_COM_CONTEXT_STORAGE}) { globalThis.${ZERO_COM_CONTEXT_STORAGE} = new (require('async_hooks').AsyncLocalStorage)(); }`
+}
+
 export const generateRegistryRequires = (registry: ServerFuncRegistry): string => {
   const requires = Array.from(registry.keys())
     .map(fp => `require(${JSON.stringify(fp)});`)
     .join('\n')
 
-  // Initialize ZERO_COM_CONTEXT_STORAGE inline so it lives inside the bundle
-  // and gets mangled together with all references. Without this, the runtime
-  // module may be externalized (loaded via Node.js require) and set the
-  // un-mangled name while the bundle references the mangled name.
-  const initContextStorage = `if (!globalThis.${ZERO_COM_CONTEXT_STORAGE}) { globalThis.${ZERO_COM_CONTEXT_STORAGE} = new (require('async_hooks').AsyncLocalStorage)(); }`
-
-  return initContextStorage + '\n' + requires
+  return generateContextStorageInit() + '\n' + requires
 }
 
 export const collectHandleCallReplacements = (sourceFile: SourceFile): Replacement[] => {
@@ -465,10 +467,18 @@ export const transformSourceFile = (
   }
 
   const isHandleFile = target === 'server' && hasHandleCall(sourceFile)
+  // Any server file that references ZERO_COM_CONTEXT_STORAGE after transformation
+  // needs the inline init so the global is available even without the handle file.
+  const needsContextStorageInit = target === 'server' && !development && replacements.some(r => r.content.includes(ZERO_COM_CONTEXT_STORAGE))
 
   if (replacements.length > 0) {
     const { code, map } = applyReplacementsWithMap(content, replacements, filePath)
-    const finalContent = isHandleFile ? generateRegistryRequires(registry) + '\n' + code : code
+    let finalContent = code
+    if (isHandleFile) {
+      finalContent = generateRegistryRequires(registry) + '\n' + finalContent
+    } else if (needsContextStorageInit) {
+      finalContent = generateContextStorageInit() + '\n' + finalContent
+    }
     return { content: finalContent, transformed: true, map }
   }
 

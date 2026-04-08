@@ -444,6 +444,41 @@ describe('transformSourceFile — server auto-registration', () => {
     expect(result.transformed).toBe(true)
     expect(result.content).toContain(`globalThis.${ZERO_COM_CONTEXT_STORAGE}.run(ctx, async () => 'done')`)
     expect(result.content).not.toContain('runWithContext(')
+    // Should inject context storage init for non-handle files
+    expect(result.content).toContain(`if (!globalThis.${ZERO_COM_CONTEXT_STORAGE})`)
+    expect(result.content).toContain('AsyncLocalStorage')
+  })
+
+  it('should inject context storage init for server files using context() in production mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const serviceSource = `import { context } from 'zero-com';\nexport const userService = { find() { const ctx = context(); return ctx.userId; } };\n`
+    const servicePath = path.join(tempDir, 'service.ts')
+
+    const result = transformSourceFile(servicePath, serviceSource, registry, { target: 'server', development: false })
+
+    expect(result.transformed).toBe(true)
+    expect(result.content).toContain(`if (!globalThis.${ZERO_COM_CONTEXT_STORAGE})`)
+    expect(result.content).toContain('AsyncLocalStorage')
+  })
+
+  it('should NOT inject context storage init in development mode', () => {
+    const funcsPath = path.join(tempDir, 'funcs.ts')
+    fs.writeFileSync(funcsPath, `import { func } from 'zero-com';\nexport const getUser = func(async (id: string) => ({ id }));\n`)
+
+    const registry: ServerFuncRegistry = new Map()
+    buildRegistry(tempDir, registry)
+
+    const runnerSource = `import { runWithContext } from 'zero-com';\nexport async function run() { return runWithContext({}, async () => 'done'); }\n`
+    const runnerPath = path.join(tempDir, 'runner.ts')
+
+    const result = transformSourceFile(runnerPath, runnerSource, registry, { target: 'server', development: true })
+
+    expect(result.content).not.toContain('AsyncLocalStorage')
   })
 
   it('should NOT replace runWithContext() in development mode', () => {
